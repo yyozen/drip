@@ -43,7 +43,6 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Validate required fields
 	if config.Server == "" {
 		return nil, fmt.Errorf("server address is required in config")
 	}
@@ -57,13 +56,11 @@ func SaveClientConfig(config *ClientConfig, path string) error {
 		path = DefaultClientConfigPath()
 	}
 
-	// Create directory if not exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Marshal to YAML
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)

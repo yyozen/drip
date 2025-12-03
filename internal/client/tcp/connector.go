@@ -2,9 +2,10 @@ package tcp
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"net"
+
+	json "github.com/goccy/go-json"
 	"sync"
 	"time"
 
@@ -132,9 +133,10 @@ func (c *Connector) Connect() error {
 		bufferPool,
 	)
 
+	c.frameWriter.EnableHeartbeat(constants.HeartbeatInterval, c.createHeartbeatFrame)
+
 	go c.frameHandler.WarmupConnectionPool(3)
 	go c.handleFrames()
-	go c.heartbeat()
 
 	return nil
 }
@@ -278,38 +280,21 @@ func (c *Connector) handleFrames() {
 	}
 }
 
-// heartbeat sends periodic heartbeat frames
-func (c *Connector) heartbeat() {
-	ticker := time.NewTicker(constants.HeartbeatInterval)
-	defer ticker.Stop()
-
-	c.sendHeartbeat()
-
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		case <-ticker.C:
-			c.sendHeartbeat()
-		}
+// createHeartbeatFrame creates a heartbeat frame to be sent by the write loop.
+func (c *Connector) createHeartbeatFrame() *protocol.Frame {
+	c.closedMu.RLock()
+	if c.closed {
+		c.closedMu.RUnlock()
+		return nil
 	}
-}
-
-// sendHeartbeat sends a heartbeat frame and records the time
-func (c *Connector) sendHeartbeat() {
-	hbFrame := protocol.NewFrame(protocol.FrameTypeHeartbeat, nil)
+	c.closedMu.RUnlock()
 
 	c.heartbeatMu.Lock()
 	c.heartbeatSentAt = time.Now()
 	c.heartbeatMu.Unlock()
 
-	err := c.frameWriter.WriteFrame(hbFrame)
-	if err != nil {
-		c.logger.Error("Failed to send heartbeat", zap.Error(err))
-		c.Close()
-		return
-	}
 	c.logger.Debug("Heartbeat sent")
+	return protocol.NewFrame(protocol.FrameTypeHeartbeat, nil)
 }
 
 // SendFrame sends a frame to the server
@@ -330,8 +315,20 @@ func (c *Connector) Close() error {
 
 		close(c.stopCh)
 
+		// Wait for active handlers with timeout
 		c.logger.Debug("Waiting for active handlers to complete")
-		c.handlerWg.Wait()
+		done := make(chan struct{})
+		go func() {
+			c.handlerWg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			c.logger.Debug("All handlers completed")
+		case <-time.After(3 * time.Second):
+			c.logger.Warn("Force closing: some handlers are still active")
+		}
 
 		if c.conn != nil {
 			closeFrame := protocol.NewFrame(protocol.FrameTypeClose, nil)

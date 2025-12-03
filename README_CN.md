@@ -32,13 +32,13 @@
 ### 客户端 (macOS/Linux)
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/refs/heads/main/scripts/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)
 ```
 
 ### 服务端 (Linux)
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/refs/heads/main/scripts/install-server.sh)
+bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install-server.sh)
 ```
 
 ## 使用方法

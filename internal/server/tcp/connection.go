@@ -2,7 +2,7 @@ package tcp
 
 import (
 	"bufio"
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"fmt"
 	"io"
 	"net"
@@ -82,7 +82,6 @@ func (c *Connection) Handle() error {
 		return fmt.Errorf("failed to peek connection: %w", err)
 	}
 
-	// Check if this is an HTTP request
 	peekStr := string(peek)
 	httpMethods := []string{"GET ", "POST", "PUT ", "DELE", "HEAD", "OPTI", "PATC", "CONN", "TRAC"}
 	isHTTP := false
@@ -110,16 +109,13 @@ func (c *Connection) Handle() error {
 		return fmt.Errorf("expected register frame, got %s", frame.Type)
 	}
 
-	// Parse registration request
 	var req protocol.RegisterRequest
 	if err := json.Unmarshal(frame.Payload, &req); err != nil {
 		return fmt.Errorf("failed to parse registration request: %w", err)
 	}
 
-	// Store tunnel type
 	c.tunnelType = req.TunnelType
 
-	// Authenticate
 	if c.authToken != "" && req.Token != c.authToken {
 		c.sendError("authentication_failed", "Invalid authentication token")
 		return fmt.Errorf("authentication failed")
@@ -144,7 +140,6 @@ func (c *Connection) Handle() error {
 		}
 	}
 
-	// Register tunnel
 	subdomain, err := c.manager.Register(nil, req.CustomSubdomain)
 	if err != nil {
 		c.sendError("registration_failed", err.Error())
@@ -155,7 +150,6 @@ func (c *Connection) Handle() error {
 
 	c.subdomain = subdomain
 
-	// Get tunnel connection
 	tunnelConn, ok := c.manager.Get(subdomain)
 	if !ok {
 		return fmt.Errorf("failed to get registered tunnel")
@@ -211,7 +205,6 @@ func (c *Connection) Handle() error {
 	// Create frame writer for async writes
 	c.frameWriter = protocol.NewFrameWriter(c.conn)
 
-	// Clear read deadline
 	c.conn.SetReadDeadline(time.Time{})
 
 	// Start TCP proxy only for TCP tunnels
@@ -222,7 +215,6 @@ func (c *Connection) Handle() error {
 		}
 	}
 
-	// Start heartbeat checker
 	go c.heartbeatChecker()
 
 	// Handle frames (pass reader for consistent buffering)
@@ -510,24 +502,20 @@ func (c *Connection) Close() {
 	c.once.Do(func() {
 		close(c.stopCh)
 
-		// Close frame writer
 		if c.frameWriter != nil {
 			c.frameWriter.Close()
 		}
 
-		// Stop TCP proxy
 		if c.proxy != nil {
 			c.proxy.Stop()
 		}
 
 		c.conn.Close()
 
-		// Release allocated port
 		if c.port > 0 && c.portAlloc != nil {
 			c.portAlloc.Release(c.port)
 		}
 
-		// Unregister tunnel
 		if c.subdomain != "" {
 			c.manager.Unregister(c.subdomain)
 		}

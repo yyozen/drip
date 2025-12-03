@@ -47,7 +47,6 @@ func (c *ServerConfig) LoadTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 
-	// Check if certificate files exist
 	if c.TLSCertFile == "" || c.TLSKeyFile == "" {
 		return nil, fmt.Errorf("TLS enabled but certificate files not specified")
 	}
@@ -60,7 +59,6 @@ func (c *ServerConfig) LoadTLSConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("key file not found: %s", c.TLSKeyFile)
 	}
 
-	// Load certificate
 	cert, err := tls.LoadX509KeyPair(c.TLSCertFile, c.TLSKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load certificate: %w", err)

@@ -58,7 +58,6 @@ func (p *TunnelProxy) Start() error {
 		zap.String("subdomain", p.subdomain),
 	)
 
-	// Accept connections in background
 	p.wg.Add(1)
 	go p.acceptLoop()
 
@@ -76,7 +75,6 @@ func (p *TunnelProxy) acceptLoop() {
 		default:
 		}
 
-		// Set accept deadline
 		p.listener.(*net.TCPListener).SetDeadline(time.Now().Add(1 * time.Second))
 
 		conn, err := p.listener.Accept()
@@ -92,7 +90,6 @@ func (p *TunnelProxy) acceptLoop() {
 			}
 		}
 
-		// Handle connection
 		p.wg.Add(1)
 		go p.handleConnection(conn)
 	}

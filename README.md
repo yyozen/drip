@@ -1,12 +1,37 @@
-# Drip - Fast Tunnels to Localhost
+<p align="center">
+  <img src="images/logo.png" alt="Drip Logo" width="128" />
+</p>
 
-Self-hosted tunneling solution. Expose your localhost to the internet securely.
+<p align="center" style="font-size: 44px; font-weight: 600; margin: 0;">Drip</p>
+<p align="center" style="font-size: 20px; font-weight: 500; margin: 8px 0 0;">
+  Your Tunnel, Your Domain, Anywhere
+</p>
 
-[中文文档](README_CN.md)
+<p align="center">
+  A self-hosted tunneling solution to securely expose your services to the internet.
+</p>
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
-[![License](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
-[![TLS](https://img.shields.io/badge/TLS-1.3-green.svg)](https://tools.ietf.org/html/rfc8446)
+<p align="center ">
+  <a href="README.md">English</a>
+  <span> | </span>
+  <a href="README_CN.md">中文文档</a>
+</p>
+
+<p align="center">
+  <a href="https://golang.org/">
+    <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go" alt="Go Version" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-BSD--3--Clause-blue.svg" alt="License" />
+  </a>
+  <a href="https://tools.ietf.org/html/rfc8446">
+    <img src="https://img.shields.io/badge/TLS-1.3-green.svg" alt="TLS" />
+  </a>
+</p>
+
+> Drip is a quiet, disciplined tunnel.  
+> You light a small lamp on your network, and it carries that light outward—through your own infrastructure, on your own terms.
+
 
 ## Why?
 
@@ -32,13 +57,13 @@ Self-hosted tunneling solution. Expose your localhost to the internet securely.
 ### Client (macOS/Linux)
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/refs/heads/main/scripts/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)
 ```
 
 ### Server (Linux)
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/refs/heads/main/scripts/install-server.sh)
+bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install-server.sh)
 ```
 
 ## Usage

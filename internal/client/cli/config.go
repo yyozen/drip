@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"drip/internal/client/cli/ui"
 	"drip/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -59,36 +60,28 @@ var (
 )
 
 func init() {
-	// Add subcommands
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configResetCmd)
 	configCmd.AddCommand(configValidateCmd)
 
-	// Flags for show
 	configShowCmd.Flags().BoolVar(&configFull, "full", false, "Show full token (not hidden)")
 
-	// Flags for set
 	configSetCmd.Flags().StringVar(&configServer, "server", "", "Server address (e.g., tunnel.example.com:443)")
 	configSetCmd.Flags().StringVar(&configToken, "token", "", "Authentication token")
 
-	// Flags for reset
 	configResetCmd.Flags().BoolVar(&configForce, "force", false, "Force reset without confirmation")
 
-	// Add to root
 	rootCmd.AddCommand(configCmd)
 }
 
 func runConfigInit(cmd *cobra.Command, args []string) error {
-	fmt.Println("\n╔═══════════════════════════════════════╗")
-	fmt.Println("║  Drip Configuration Setup             ║")
-	fmt.Println("╚═══════════════════════════════════════╝")
+	fmt.Print(ui.RenderConfigInit())
 
 	reader := bufio.NewReader(os.Stdin)
 
-	// Get server address
-	fmt.Print("Server address (e.g., tunnel.example.com:443): ")
+	fmt.Print(ui.Muted("Server address (e.g., tunnel.example.com:443): "))
 	serverAddr, _ := reader.ReadString('\n')
 	serverAddr = strings.TrimSpace(serverAddr)
 
@@ -96,102 +89,79 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("server address is required")
 	}
 
-	// Get token
-	fmt.Print("Authentication token (leave empty to skip): ")
+	fmt.Print(ui.Muted("Authentication token (leave empty to skip): "))
 	token, _ := reader.ReadString('\n')
 	token = strings.TrimSpace(token)
 
-	// Create config
 	cfg := &config.ClientConfig{
 		Server: serverAddr,
 		Token:  token,
 		TLS:    true,
 	}
 
-	// Save config
 	if err := config.SaveClientConfig(cfg, ""); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	fmt.Println("\n✓ Configuration saved to", config.DefaultClientConfigPath())
-	fmt.Println("✓ You can now use 'drip' without --server and --token")
+	fmt.Println(ui.RenderConfigSaved(config.DefaultClientConfigPath()))
 
 	return nil
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) error {
-	// Load config
 	cfg, err := config.LoadClientConfig("")
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("\n╔═══════════════════════════════════════╗")
-	fmt.Println("║  Current Configuration                 ║")
-	fmt.Println("╚═══════════════════════════════════════╝")
-
-	fmt.Printf("Server:  %s\n", cfg.Server)
-
-	// Show token (hidden or full)
+	var displayToken string
 	if cfg.Token != "" {
-		if configFull {
-			fmt.Printf("Token:   %s\n", cfg.Token)
+		if len(cfg.Token) > 10 {
+			displayToken = cfg.Token[:3] + "***" + cfg.Token[len(cfg.Token)-3:]
 		} else {
-			// Hide middle part of token
-			if len(cfg.Token) > 10 {
-				fmt.Printf("Token:   %s***%s (hidden)\n",
-					cfg.Token[:3],
-					cfg.Token[len(cfg.Token)-3:],
-				)
-			} else {
-				fmt.Printf("Token:   %s (hidden)\n", cfg.Token[:3]+"***")
-			}
+			displayToken = cfg.Token[:3] + "***"
 		}
 	} else {
-		fmt.Println("Token:   (not set)")
+		displayToken = ""
 	}
 
-	fmt.Printf("TLS:     %s\n", enabledDisabled(cfg.TLS))
-	fmt.Printf("Config:  %s\n\n", config.DefaultClientConfigPath())
+	fmt.Println(ui.RenderConfigShow(cfg.Server, displayToken, !configFull, cfg.TLS, config.DefaultClientConfigPath()))
 
 	return nil
 }
 
 func runConfigSet(cmd *cobra.Command, args []string) error {
-	// Load existing config or create new
 	cfg, err := config.LoadClientConfig("")
 	if err != nil {
-		// Create new config if not exists
 		cfg = &config.ClientConfig{
 			TLS: true,
 		}
 	}
 
-	// Update fields if provided
 	modified := false
+	var updates []string
 
 	if configServer != "" {
 		cfg.Server = configServer
 		modified = true
-		fmt.Printf("✓ Server updated: %s\n", configServer)
+		updates = append(updates, "Server updated: "+configServer)
 	}
 
 	if configToken != "" {
 		cfg.Token = configToken
 		modified = true
-		fmt.Println("✓ Token updated")
+		updates = append(updates, "Token updated")
 	}
 
 	if !modified {
 		return fmt.Errorf("no changes specified. Use --server or --token")
 	}
 
-	// Save config
 	if err := config.SaveClientConfig(cfg, ""); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	fmt.Println("✓ Configuration saved")
+	fmt.Println(ui.RenderConfigUpdated(updates))
 
 	return nil
 }
@@ -199,13 +169,11 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 func runConfigReset(cmd *cobra.Command, args []string) error {
 	configPath := config.DefaultClientConfigPath()
 
-	// Check if config exists
 	if !config.ConfigExists("") {
 		fmt.Println("No configuration file found")
 		return nil
 	}
 
-	// Confirm deletion
 	if !configForce {
 		fmt.Print("Are you sure you want to delete the configuration? (y/N): ")
 		reader := bufio.NewReader(os.Stdin)
@@ -218,49 +186,31 @@ func runConfigReset(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Delete config file
 	if err := os.Remove(configPath); err != nil {
 		return fmt.Errorf("failed to delete configuration: %w", err)
 	}
 
-	fmt.Println("✓ Configuration file deleted")
+	fmt.Println(ui.RenderConfigDeleted())
 
 	return nil
 }
 
 func runConfigValidate(cmd *cobra.Command, args []string) error {
-	fmt.Println("\nValidating configuration...")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-	// Load config
 	cfg, err := config.LoadClientConfig("")
 	if err != nil {
-		fmt.Println("✗ Failed to load configuration")
+		fmt.Println(ui.Error("Failed to load configuration"))
 		return err
 	}
 
-	// Validate server address
-	if cfg.Server == "" {
-		fmt.Println("✗ Server address is not set")
+	serverValid := cfg.Server != ""
+	tokenSet := cfg.Token != ""
+	tlsEnabled := cfg.TLS
+
+	fmt.Println(ui.RenderConfigValidation(serverValid, tokenSet, tlsEnabled))
+
+	if !serverValid {
 		return fmt.Errorf("invalid configuration")
 	}
-	fmt.Println("✓ Server address is valid")
-
-	// Validate token
-	if cfg.Token != "" {
-		fmt.Println("✓ Token is set")
-	} else {
-		fmt.Println("⚠ Token is not set (authentication may fail)")
-	}
-
-	// Validate TLS
-	if cfg.TLS {
-		fmt.Println("✓ TLS is enabled")
-	} else {
-		fmt.Println("⚠ TLS is disabled (not recommended for production)")
-	}
-
-	fmt.Println("\n✓ Configuration is valid")
 
 	return nil
 }

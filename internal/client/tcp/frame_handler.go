@@ -19,7 +19,7 @@ import (
 // FrameHandler handles data frames and forwards to local service
 type FrameHandler struct {
 	conn          net.Conn
-	frameWriter   *protocol.FrameWriter // Async batch writer (replaces writeMu)
+	frameWriter   *protocol.FrameWriter
 	localHost     string
 	localPort     int
 	logger        *zap.Logger
@@ -28,9 +28,9 @@ type FrameHandler struct {
 	tunnelType    protocol.TunnelType
 	httpClient    *http.Client
 	stats         *TrafficStats
-	isClosedCheck func() bool // Function to check if connection is closed
+	isClosedCheck func() bool
 	bufferPool    *pool.BufferPool
-	headerPool    *pool.HeaderPool // Header pool for Priority 9 optimization
+	headerPool    *pool.HeaderPool
 }
 
 // Stream represents a single request/response stream

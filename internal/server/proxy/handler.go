@@ -2,13 +2,14 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	json "github.com/goccy/go-json"
 
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/constants"
@@ -244,7 +245,7 @@ func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
 <html>
 <head>
 	<meta charset="UTF-8" />
-    <title>Drip - Tunnel to Localhost</title>
+    <title>Drip - Your Tunnel, Your Domain, Anywhere</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
         h1 { color: #333; }
@@ -253,12 +254,12 @@ func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
     </style>
 </head>
 <body>
-    <h1>💧 Drip - Fast Tunnels to Localhost</h1>
-    <p>A high-performance tunneling service.</p>
+    <h1>💧 Drip - Your Tunnel, Your Domain, Anywhere</h1>
+    <p>A self-hosted tunneling solution to securely expose your services to the internet.</p>
 
     <h2>Quick Start</h2>
     <p>Install the client:</p>
-    <code>bash <(curl -fsSL https://raw.githubusercontent.com/Gouryella/drip/refs/heads/main/scripts/install.sh)</code>
+    <code>bash <(curl -fsSL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)</code>
 
     <p>Start a tunnel:</p>
 	<code>drip http 3000</code><br><br>

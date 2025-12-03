@@ -5,8 +5,7 @@ import (
 	"sync"
 )
 
-// HeaderPool manages a pool of http.Header objects for reuse
-// This reduces GC pressure from repeated header map allocations
+// HeaderPool manages a pool of http.Header objects for reuse.
 type HeaderPool struct {
 	pool sync.Pool
 }
@@ -16,32 +15,26 @@ func NewHeaderPool() *HeaderPool {
 	return &HeaderPool{
 		pool: sync.Pool{
 			New: func() interface{} {
-				// Pre-allocate with capacity for common header count (8-12 headers)
 				return make(http.Header, 12)
 			},
 		},
 	}
 }
 
-// Get retrieves a header from the pool
-// Returns a clean, empty header ready for use
+// Get retrieves a header from the pool.
 func (p *HeaderPool) Get() http.Header {
 	h := p.pool.Get().(http.Header)
-	// Clear any existing data (headers might be dirty from previous use)
 	for k := range h {
 		delete(h, k)
 	}
 	return h
 }
 
-// Put returns a header to the pool
-// The header will be reused by future Get() calls
+// Put returns a header to the pool.
 func (p *HeaderPool) Put(h http.Header) {
 	if h == nil {
 		return
 	}
-	// Note: We don't clear here, clearing is done in Get() for better performance
-	// (allows the GC to collect during idle time)
 	p.pool.Put(h)
 }
 

@@ -17,6 +17,10 @@ type FrameWriter struct {
 
 	maxBatch     int
 	maxBatchWait time.Duration
+
+	heartbeatInterval time.Duration
+	heartbeatCallback func() *Frame
+	heartbeatEnabled  bool
 }
 
 func NewFrameWriter(conn io.Writer) *FrameWriter {
@@ -37,8 +41,22 @@ func NewFrameWriterWithConfig(conn io.Writer, maxBatch int, maxBatchWait time.Du
 }
 
 func (w *FrameWriter) writeLoop() {
-	ticker := time.NewTicker(w.maxBatchWait)
-	defer ticker.Stop()
+	batchTicker := time.NewTicker(w.maxBatchWait)
+	defer batchTicker.Stop()
+
+	var heartbeatTicker *time.Ticker
+	var heartbeatCh <-chan time.Time
+
+	w.mu.Lock()
+	if w.heartbeatEnabled && w.heartbeatInterval > 0 {
+		heartbeatTicker = time.NewTicker(w.heartbeatInterval)
+		heartbeatCh = heartbeatTicker.C
+	}
+	w.mu.Unlock()
+
+	if heartbeatTicker != nil {
+		defer heartbeatTicker.Stop()
+	}
 
 	for {
 		select {
@@ -58,10 +76,20 @@ func (w *FrameWriter) writeLoop() {
 			}
 			w.mu.Unlock()
 
-		case <-ticker.C:
+		case <-batchTicker.C:
 			w.mu.Lock()
 			if len(w.batch) > 0 {
 				w.flushBatchLocked()
+			}
+			w.mu.Unlock()
+
+		case <-heartbeatCh:
+			w.mu.Lock()
+			if w.heartbeatCallback != nil {
+				if frame := w.heartbeatCallback(); frame != nil {
+					w.batch = append(w.batch, frame)
+					w.flushBatchLocked()
+				}
 			}
 			w.mu.Unlock()
 
@@ -86,6 +114,8 @@ func (w *FrameWriter) flushBatchLocked() {
 	w.batch = w.batch[:0]
 }
 
+// WriteFrame queues a frame to be written by the write loop.
+// Blocks if the queue is full to ensure all writes go through the single write loop.
 func (w *FrameWriter) WriteFrame(frame *Frame) error {
 	w.mu.Lock()
 	if w.closed {
@@ -99,8 +129,6 @@ func (w *FrameWriter) WriteFrame(frame *Frame) error {
 		return nil
 	case <-w.done:
 		return errors.New("writer closed")
-	default:
-		return WriteFrame(w.conn, frame)
 	}
 }
 
@@ -123,4 +151,20 @@ func (w *FrameWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.flushBatchLocked()
+}
+
+// EnableHeartbeat enables automatic heartbeat sending in the write loop.
+func (w *FrameWriter) EnableHeartbeat(interval time.Duration, callback func() *Frame) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.heartbeatInterval = interval
+	w.heartbeatCallback = callback
+	w.heartbeatEnabled = true
+}
+
+// DisableHeartbeat disables automatic heartbeat sending.
+func (w *FrameWriter) DisableHeartbeat() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.heartbeatEnabled = false
 }

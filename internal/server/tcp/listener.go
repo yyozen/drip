@@ -61,7 +61,6 @@ func NewListener(address string, tlsConfig *tls.Config, authToken string, manage
 func (l *Listener) Start() error {
 	var err error
 
-	// Create TLS listener
 	l.listener, err = tls.Listen("tcp", l.address, l.tlsConfig)
 	if err != nil {
 		return fmt.Errorf("failed to start TLS listener: %w", err)
@@ -72,7 +71,6 @@ func (l *Listener) Start() error {
 		zap.String("tls_version", "TLS 1.3"),
 	)
 
-	// Accept connections in background
 	l.wg.Add(1)
 	go l.acceptLoop()
 
@@ -102,7 +100,7 @@ func (l *Listener) acceptLoop() {
 			}
 			select {
 			case <-l.stopCh:
-				return // Listener was stopped
+				return
 			default:
 				l.logger.Error("Failed to accept connection", zap.Error(err))
 				continue
@@ -128,14 +126,12 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 	defer l.wg.Done()
 	defer netConn.Close()
 
-	// Get TLS connection info
 	tlsConn, ok := netConn.(*tls.Conn)
 	if !ok {
 		l.logger.Error("Connection is not TLS")
 		return
 	}
 
-	// Force TLS handshake to complete
 	if err := tlsConn.Handshake(); err != nil {
 		// TLS handshake failures are common (HTTP clients, scanners, etc.)
 		// Log as WARN instead of ERROR
@@ -146,7 +142,6 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		return
 	}
 
-	// Log connection info
 	state := tlsConn.ConnectionState()
 	l.logger.Info("New connection",
 		zap.String("remote_addr", netConn.RemoteAddr().String()),
@@ -154,7 +149,6 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		zap.String("cipher_suite", tls.CipherSuiteName(state.CipherSuite)),
 	)
 
-	// Verify TLS 1.3
 	if state.Version != tls.VersionTLS13 {
 		l.logger.Warn("Connection not using TLS 1.3",
 			zap.Uint16("version", state.Version),
@@ -162,23 +156,19 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		return
 	}
 
-	// Create connection handler
 	conn := NewConnection(netConn, l.authToken, l.manager, l.logger, l.portAlloc, l.domain, l.publicPort, l.httpHandler, l.responseChans)
 
-	// Store connection
 	connID := netConn.RemoteAddr().String()
 	l.connMu.Lock()
 	l.connections[connID] = conn
 	l.connMu.Unlock()
 
-	// Remove connection on exit
 	defer func() {
 		l.connMu.Lock()
 		delete(l.connections, connID)
 		l.connMu.Unlock()
 	}()
 
-	// Handle connection (blocking)
 	if err := conn.Handle(); err != nil {
 		errStr := err.Error()
 
@@ -217,27 +207,22 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 func (l *Listener) Stop() error {
 	l.logger.Info("Stopping TCP listener")
 
-	// Signal stop
 	close(l.stopCh)
 
-	// Close listener
 	if l.listener != nil {
 		if err := l.listener.Close(); err != nil {
 			l.logger.Error("Failed to close listener", zap.Error(err))
 		}
 	}
 
-	// Close all connections
 	l.connMu.Lock()
 	for _, conn := range l.connections {
 		conn.Close()
 	}
 	l.connMu.Unlock()
 
-	// Wait for all goroutines to finish
 	l.wg.Wait()
 
-	// Close worker pool
 	if l.workerPool != nil {
 		l.workerPool.Close()
 	}

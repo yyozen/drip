@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"drip/internal/client/cli/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -59,12 +60,13 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("Drip Client\n")
-		fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		fmt.Printf("Version:     %s\n", Version)
-		fmt.Printf("Git Commit:  %s\n", GitCommit)
-		fmt.Printf("Build Time:  %s\n", BuildTime)
-		fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		fmt.Println(ui.Info(
+			"Drip Client",
+			"",
+			ui.KeyValue("Version", Version),
+			ui.KeyValue("Git Commit", GitCommit),
+			ui.KeyValue("Build Time", BuildTime),
+		))
 	},
 }
 

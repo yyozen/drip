@@ -60,7 +60,6 @@ func init() {
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
-	// Validate required TLS configuration
 	if serverTLSCert == "" {
 		return fmt.Errorf("TLS certificate path is required (use --tls-cert flag or DRIP_TLS_CERT environment variable)")
 	}
@@ -68,7 +67,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TLS private key path is required (use --tls-key flag or DRIP_TLS_KEY environment variable)")
 	}
 
-	// Initialize logger
 	if err := utils.InitServerLogger(serverDebug); err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -81,7 +79,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		zap.String("commit", GitCommit),
 	)
 
-	// Start pprof server if enabled
 	if serverPprofPort > 0 {
 		go func() {
 			pprofAddr := fmt.Sprintf("localhost:%d", serverPprofPort)
@@ -92,7 +89,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	// Create server config
 	displayPort := serverPublicPort
 	if displayPort == 0 {
 		displayPort = serverPort
@@ -111,7 +107,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		Debug:       serverDebug,
 	}
 
-	// Load TLS configuration
 	tlsConfig, err := serverConfig.LoadTLSConfig()
 	if err != nil {
 		logger.Fatal("Failed to load TLS configuration", zap.Error(err))
@@ -122,28 +117,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 		zap.String("key", serverTLSKey),
 	)
 
-	// Create tunnel manager
 	tunnelManager := tunnel.NewManager(logger)
 
-	// Create TCP port allocator
 	portAllocator, err := tcp.NewPortAllocator(serverTCPPortMin, serverTCPPortMax)
 	if err != nil {
 		logger.Fatal("Invalid TCP port range", zap.Error(err))
 	}
 
-	// Create TCP listener address
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", serverPort)
 
-	// Response handler for HTTP-over-frame responses
 	responseHandler := proxy.NewResponseHandler(logger)
 
-	// Create HTTP proxy handler (for handling HTTP requests on TCP port)
 	httpHandler := proxy.NewHandler(tunnelManager, logger, responseHandler, serverDomain, serverAuthToken)
 
-	// Create TCP listener (wsHandler also serves as response channel handler)
 	listener := tcp.NewListener(listenAddr, tlsConfig, serverAuthToken, tunnelManager, logger, portAllocator, serverDomain, displayPort, httpHandler, responseHandler)
 
-	// Start listener
 	if err := listener.Start(); err != nil {
 		logger.Fatal("Failed to start TCP listener", zap.Error(err))
 	}
@@ -154,16 +142,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 		zap.String("protocol", "TCP over TLS 1.3"),
 	)
 
-	// Setup signal handler
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// Wait for signal
 	<-quit
 
 	logger.Info("Shutting down server...")
 
-	// Stop listener
 	if err := listener.Stop(); err != nil {
 		logger.Error("Error stopping listener", zap.Error(err))
 	}

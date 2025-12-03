@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"errors"
 
 	"github.com/vmihailenco/msgpack/v5"

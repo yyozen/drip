@@ -1,6 +1,6 @@
 package protocol
 
-import "encoding/json"
+import json "github.com/goccy/go-json"
 
 // RegisterRequest is sent by client to register a tunnel
 type RegisterRequest struct {

@@ -28,12 +28,10 @@ func init() {
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	// Handle "stop all"
 	if args[0] == "all" {
 		return stopAllDaemons()
 	}
 
-	// Handle "stop <type> <port>"
 	if len(args) < 2 {
 		return fmt.Errorf("usage: drip stop <type> <port> or drip stop all")
 	}
@@ -61,19 +59,15 @@ func stopDaemon(tunnelType string, port int) error {
 		return fmt.Errorf("no %s tunnel running on port %d", tunnelType, port)
 	}
 
-	// Check if process is still running
 	if !IsProcessRunning(info.PID) {
-		// Clean up stale entry
 		RemoveDaemonInfo(tunnelType, port)
 		return fmt.Errorf("tunnel was not running (cleaned up stale entry)")
 	}
 
-	// Kill the process
 	if err := KillProcess(info.PID); err != nil {
 		return fmt.Errorf("failed to stop tunnel: %w", err)
 	}
 
-	// Remove daemon info
 	RemoveDaemonInfo(tunnelType, port)
 
 	fmt.Printf("\033[32m✓\033[0m Stopped %s tunnel on port %d (PID: %d)\n", tunnelType, port, info.PID)
@@ -81,7 +75,6 @@ func stopDaemon(tunnelType string, port int) error {
 }
 
 func stopAllDaemons() error {
-	// Clean up stale daemons first
 	CleanupStaleDaemons()
 
 	daemons, err := ListAllDaemons()

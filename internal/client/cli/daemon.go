@@ -1,13 +1,15 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"drip/internal/client/cli/ui"
+	json "github.com/goccy/go-json"
 )
 
 // DaemonInfo stores information about a running daemon process
@@ -170,13 +172,10 @@ func StartDaemon(tunnelType string, port int, args []string) error {
 		cleanArgs = append(cleanArgs, arg)
 	}
 
-	// Create the command
 	cmd := exec.Command(executable, cleanArgs...)
 
-	// Detach from parent process (platform-specific)
 	setupDaemonCmd(cmd)
 
-	// Create log file for daemon output
 	logDir := getDaemonDir()
 	if err := os.MkdirAll(logDir, 0700); err != nil {
 		return fmt.Errorf("failed to create daemon directory: %w", err)
@@ -187,7 +186,6 @@ func StartDaemon(tunnelType string, port int, args []string) error {
 		return fmt.Errorf("failed to create log file: %w", err)
 	}
 
-	// Redirect stdin to /dev/null
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
 	if err != nil {
 		logFile.Close()
@@ -197,7 +195,6 @@ func StartDaemon(tunnelType string, port int, args []string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	// Start the process
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		devNull.Close()
@@ -207,11 +204,7 @@ func StartDaemon(tunnelType string, port int, args []string) error {
 	// Don't wait for the process - let it run in background
 	// The child process will save its own daemon info after connecting
 
-	fmt.Printf("\033[32m✓\033[0m Started %s tunnel on port %d in background (PID: %d)\n", tunnelType, port, cmd.Process.Pid)
-	fmt.Printf("  Use '\033[36mdrip list\033[0m' to check tunnel status\n")
-	fmt.Printf("  Use '\033[36mdrip attach %s %d\033[0m' to view logs\n", tunnelType, port)
-	fmt.Printf("  Use '\033[36mdrip stop %s %d\033[0m' to stop this tunnel\n", tunnelType, port)
-	fmt.Printf("  Logs: \033[90m%s\033[0m\n", logPath)
+	fmt.Println(ui.RenderDaemonStarted(tunnelType, port, cmd.Process.Pid, logPath))
 
 	return nil
 }
@@ -249,11 +242,9 @@ func FormatDuration(d time.Duration) string {
 // ParsePortFromArgs extracts the port number from command arguments
 func ParsePortFromArgs(args []string) (int, error) {
 	for _, arg := range args {
-		// Skip flags
 		if len(arg) > 0 && arg[0] == '-' {
 			continue
 		}
-		// Try to parse as port number
 		port, err := strconv.Atoi(arg)
 		if err == nil && port > 0 && port <= 65535 {
 			return port, nil
