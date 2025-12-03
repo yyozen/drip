@@ -21,6 +21,7 @@ type FrameWriter struct {
 	heartbeatInterval time.Duration
 	heartbeatCallback func() *Frame
 	heartbeatEnabled  bool
+	heartbeatControl  chan struct{}
 }
 
 func NewFrameWriter(conn io.Writer) *FrameWriter {
@@ -29,12 +30,13 @@ func NewFrameWriter(conn io.Writer) *FrameWriter {
 
 func NewFrameWriterWithConfig(conn io.Writer, maxBatch int, maxBatchWait time.Duration, queueSize int) *FrameWriter {
 	w := &FrameWriter{
-		conn:         conn,
-		queue:        make(chan *Frame, queueSize),
-		batch:        make([]*Frame, 0, maxBatch),
-		maxBatch:     maxBatch,
-		maxBatchWait: maxBatchWait,
-		done:         make(chan struct{}),
+		conn:             conn,
+		queue:            make(chan *Frame, queueSize),
+		batch:            make([]*Frame, 0, maxBatch),
+		maxBatch:         maxBatch,
+		maxBatchWait:     maxBatchWait,
+		done:             make(chan struct{}),
+		heartbeatControl: make(chan struct{}, 1),
 	}
 	go w.writeLoop()
 	return w
@@ -54,9 +56,11 @@ func (w *FrameWriter) writeLoop() {
 	}
 	w.mu.Unlock()
 
-	if heartbeatTicker != nil {
-		defer heartbeatTicker.Stop()
-	}
+	defer func() {
+		if heartbeatTicker != nil {
+			heartbeatTicker.Stop()
+		}
+	}()
 
 	for {
 		select {
@@ -90,6 +94,19 @@ func (w *FrameWriter) writeLoop() {
 					w.batch = append(w.batch, frame)
 					w.flushBatchLocked()
 				}
+			}
+			w.mu.Unlock()
+
+		case <-w.heartbeatControl:
+			w.mu.Lock()
+			if heartbeatTicker != nil {
+				heartbeatTicker.Stop()
+				heartbeatTicker = nil
+				heartbeatCh = nil
+			}
+			if w.heartbeatEnabled && w.heartbeatInterval > 0 {
+				heartbeatTicker = time.NewTicker(w.heartbeatInterval)
+				heartbeatCh = heartbeatTicker.C
 			}
 			w.mu.Unlock()
 
@@ -156,15 +173,27 @@ func (w *FrameWriter) Flush() {
 // EnableHeartbeat enables automatic heartbeat sending in the write loop.
 func (w *FrameWriter) EnableHeartbeat(interval time.Duration, callback func() *Frame) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.heartbeatInterval = interval
 	w.heartbeatCallback = callback
 	w.heartbeatEnabled = true
+	w.mu.Unlock()
+
+	select {
+	case w.heartbeatControl <- struct{}{}:
+	default:
+		// Channel already has a pending signal, no need to send another
+	}
 }
 
 // DisableHeartbeat disables automatic heartbeat sending.
 func (w *FrameWriter) DisableHeartbeat() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.heartbeatEnabled = false
+	w.mu.Unlock()
+
+	select {
+	case w.heartbeatControl <- struct{}{}:
+	default:
+		// Channel already has a pending signal, no need to send another
+	}
 }

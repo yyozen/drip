@@ -57,9 +57,19 @@ func RenderTunnelConnected(status *TunnelStatus) string {
 		lipgloss.NewStyle().MarginLeft(2).Render(typeBadge),
 	)
 
-	urlLine := urlStyle.Copy().Foreground(accent).Render(status.URL)
-	forwardLine := Muted("⇢ ") + valueStyle.Render(status.LocalAddr)
-	hint := mutedStyle.Render("Ctrl+C to stop • reconnects automatically")
+	urlLine := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		urlStyle.Copy().Foreground(accent).Render(status.URL),
+		lipgloss.NewStyle().MarginLeft(1).Foreground(mutedColor).Render("(forwarded link)"),
+	)
+
+	forwardLine := lipgloss.NewStyle().
+		MarginLeft(2).
+		Render(Muted("⇢ ") + valueStyle.Render(status.LocalAddr))
+
+	hint := lipgloss.NewStyle().
+		Foreground(latencyOrangeColor).
+		Render("Ctrl+C to stop • reconnects automatically")
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
