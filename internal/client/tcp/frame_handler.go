@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -28,6 +29,8 @@ type FrameHandler struct {
 	streamMu          sync.RWMutex
 	streamingRequests map[string]*StreamingRequest
 	streamingReqMu    sync.RWMutex
+	responseCancels   map[string]context.CancelFunc
+	responseCancelMu  sync.RWMutex
 	tunnelType        protocol.TunnelType
 	httpClient        *http.Client
 	stats             *TrafficStats
@@ -77,6 +80,7 @@ func NewFrameHandler(conn net.Conn, frameWriter *protocol.FrameWriter, localHost
 		logger:            logger,
 		streams:           make(map[string]*Stream),
 		streamingRequests: make(map[string]*StreamingRequest),
+		responseCancels:   make(map[string]context.CancelFunc),
 		tunnelType:        tunnelType,
 		stats:             NewTrafficStats(),
 		isClosedCheck:     isClosedCheck,
@@ -129,6 +133,11 @@ func (h *FrameHandler) HandleDataFrame(frame *protocol.Frame) error {
 	}
 
 	if header.Type == protocol.DataTypeClose {
+		cancelID := header.RequestID
+		if cancelID == "" {
+			cancelID = header.StreamID
+		}
+		h.cancelResponse(cancelID)
 		h.closeStream(header.StreamID)
 		return nil
 	}
@@ -386,6 +395,16 @@ func (h *FrameHandler) adaptiveHTTPResponse(streamID, requestID string, resp *ht
 	// Clean response headers - remove hop-by-hop headers that are invalid after proxying
 	cleanedHeaders := h.cleanResponseHeaders(resp.Header)
 
+	cancelID := requestID
+	if cancelID == "" {
+		cancelID = streamID
+	}
+
+	h.registerResponseCancel(cancelID, func() {
+		resp.Body.Close()
+	})
+	defer h.unregisterResponseCancel(cancelID)
+
 	// First send headers
 	httpHead := protocol.HTTPResponseHead{
 		StatusCode:    resp.StatusCode,
@@ -497,6 +516,9 @@ func (h *FrameHandler) adaptiveHTTPResponse(streamID, requestID string, resp *ht
 			break
 		}
 		if readErr != nil {
+			if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) || errors.Is(readErr, http.ErrBodyReadAfterClose) || errors.Is(readErr, net.ErrClosed) {
+				return nil
+			}
 			return fmt.Errorf("read response body: %w", readErr)
 		}
 	}
@@ -528,6 +550,16 @@ func (h *FrameHandler) streamHTTPResponse(streamID, requestID string, resp *http
 	if h.isClosedCheck != nil && h.isClosedCheck() {
 		return nil
 	}
+
+	cancelID := requestID
+	if cancelID == "" {
+		cancelID = streamID
+	}
+
+	h.registerResponseCancel(cancelID, func() {
+		resp.Body.Close()
+	})
+	defer h.unregisterResponseCancel(cancelID)
 
 	// Clean response headers - remove hop-by-hop headers that are invalid after proxying
 	cleanedHeaders := h.cleanResponseHeaders(resp.Header)
@@ -620,6 +652,9 @@ func (h *FrameHandler) streamHTTPResponse(streamID, requestID string, resp *http
 			break
 		}
 		if readErr != nil {
+			if errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded) || errors.Is(readErr, http.ErrBodyReadAfterClose) || errors.Is(readErr, net.ErrClosed) {
+				return nil
+			}
 			return fmt.Errorf("read response body: %w", readErr)
 		}
 	}
@@ -1075,4 +1110,33 @@ func (h *FrameHandler) closeStreamingRequest(requestID string, streamingReq *Str
 	streamingReq.closed = true
 	close(streamingReq.Done)
 	streamingReq.mu.Unlock()
+}
+
+func (h *FrameHandler) registerResponseCancel(id string, cancel context.CancelFunc) {
+	if cancel == nil {
+		return
+	}
+
+	h.responseCancelMu.Lock()
+	h.responseCancels[id] = cancel
+	h.responseCancelMu.Unlock()
+}
+
+func (h *FrameHandler) cancelResponse(id string) {
+	h.responseCancelMu.Lock()
+	cancel := h.responseCancels[id]
+	if cancel != nil {
+		delete(h.responseCancels, id)
+	}
+	h.responseCancelMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (h *FrameHandler) unregisterResponseCancel(id string) {
+	h.responseCancelMu.Lock()
+	delete(h.responseCancels, id)
+	h.responseCancelMu.Unlock()
 }

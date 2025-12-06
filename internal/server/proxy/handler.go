@@ -77,6 +77,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleAdaptiveRequest(w http.ResponseWriter, r *http.Request, transport tunnel.Transport, requestID string, subdomain string) {
 	const streamingThreshold int64 = 1 * 1024 * 1024
 
+	if transport != nil {
+		h.responses.RegisterCancelFunc(requestID, func() {
+			header := protocol.DataHeader{
+				StreamID:  requestID,
+				RequestID: requestID,
+				Type:      protocol.DataTypeClose,
+				IsLast:    true,
+			}
+
+			payload, poolBuffer, err := protocol.EncodeDataPayloadPooled(header, nil)
+			if err != nil {
+				return
+			}
+
+			frame := protocol.NewFramePooled(protocol.FrameTypeData, payload, poolBuffer)
+			if err := transport.SendFrame(frame); err != nil {
+				h.logger.Debug("Failed to send cancel frame to client",
+					zap.String("request_id", requestID),
+					zap.Error(err),
+				)
+			}
+		})
+
+		defer h.responses.CleanupCancelFunc(requestID)
+	}
+
 	buffer := make([]byte, 0, streamingThreshold)
 	tempBuf := make([]byte, 32*1024)
 

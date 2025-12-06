@@ -33,6 +33,7 @@ type streamingResponseEntry struct {
 type ResponseHandler struct {
 	channels          map[string]*responseChanEntry
 	streamingChannels map[string]*streamingResponseEntry
+	cancelFuncs       map[string]func()
 	mu                sync.RWMutex
 	logger            *zap.Logger
 	stopCh            chan struct{}
@@ -43,6 +44,7 @@ func NewResponseHandler(logger *zap.Logger) *ResponseHandler {
 	h := &ResponseHandler{
 		channels:          make(map[string]*responseChanEntry),
 		streamingChannels: make(map[string]*streamingResponseEntry),
+		cancelFuncs:       make(map[string]func()),
 		logger:            logger,
 		stopCh:            make(chan struct{}),
 	}
@@ -84,6 +86,17 @@ func (h *ResponseHandler) CreateStreamingResponse(requestID string, w http.Respo
 	}
 
 	return done
+}
+
+// RegisterCancelFunc registers a callback to be invoked when the downstream disconnects.
+func (h *ResponseHandler) RegisterCancelFunc(requestID string, cancel func()) {
+	if cancel == nil {
+		return
+	}
+
+	h.mu.Lock()
+	h.cancelFuncs[requestID] = cancel
+	h.mu.Unlock()
 }
 
 // GetResponseChan gets the response channel for a request ID
@@ -215,6 +228,7 @@ func (h *ResponseHandler) SendStreamingChunk(requestID string, chunk []byte, isL
 				default:
 					close(entry.done)
 				}
+				h.triggerCancel(requestID)
 				return nil
 			}
 			select {
@@ -222,6 +236,7 @@ func (h *ResponseHandler) SendStreamingChunk(requestID string, chunk []byte, isL
 			default:
 				close(entry.done)
 			}
+			h.triggerCancel(requestID)
 			return nil
 		}
 
@@ -265,6 +280,22 @@ func isClientDisconnectError(err error) bool {
 		strings.Contains(errStr, "use of closed network connection")
 }
 
+// triggerCancel invokes and removes the cancel callback for a request.
+func (h *ResponseHandler) triggerCancel(requestID string) {
+	h.mu.Lock()
+	cancel := h.cancelFuncs[requestID]
+	if cancel != nil {
+		delete(h.cancelFuncs, requestID)
+	}
+	h.mu.Unlock()
+
+	if cancel != nil {
+		go func() {
+			cancel()
+		}()
+	}
+}
+
 func (h *ResponseHandler) CleanupResponseChan(requestID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -287,6 +318,13 @@ func (h *ResponseHandler) CleanupStreamingResponse(requestID string) {
 		}
 		delete(h.streamingChannels, requestID)
 	}
+}
+
+// CleanupCancelFunc removes a registered cancel callback.
+func (h *ResponseHandler) CleanupCancelFunc(requestID string) {
+	h.mu.Lock()
+	delete(h.cancelFuncs, requestID)
+	h.mu.Unlock()
 }
 
 func (h *ResponseHandler) GetPendingCount() int {
@@ -318,6 +356,7 @@ func (h *ResponseHandler) cleanupExpiredChannels() {
 	defer h.mu.Unlock()
 
 	expiredCount := 0
+	cancelList := make([]string, 0)
 	for requestID, entry := range h.channels {
 		if now.Sub(entry.createdAt) > timeout {
 			close(entry.ch)
@@ -334,7 +373,15 @@ func (h *ResponseHandler) cleanupExpiredChannels() {
 				close(entry.done)
 			}
 			delete(h.streamingChannels, requestID)
+			cancelList = append(cancelList, requestID)
 			expiredCount++
+		}
+	}
+
+	for _, requestID := range cancelList {
+		if cancel := h.cancelFuncs[requestID]; cancel != nil {
+			delete(h.cancelFuncs, requestID)
+			go cancel()
 		}
 	}
 
@@ -365,4 +412,9 @@ func (h *ResponseHandler) Close() {
 		}
 	}
 	h.streamingChannels = make(map[string]*streamingResponseEntry)
+
+	for _, cancel := range h.cancelFuncs {
+		cancel()
+	}
+	h.cancelFuncs = make(map[string]func())
 }
