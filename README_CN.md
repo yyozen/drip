@@ -52,17 +52,14 @@
 
 ## 快速安装
 
-### 客户端（macOS/Linux）
-
 ```bash
 bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)
 ```
 
-### 服务端（Linux）
-
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install-server.sh)
-```
+- 先选择语言，再选择安装 **客户端**（macOS/Linux）或 **服务器**（Linux）。
+- 非交互示例：
+  - 客户端：`bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --client`
+  - 服务器：`bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --server`
 
 ### 卸载
 ```bash

@@ -52,17 +52,14 @@
 
 ## Quick Install
 
-### Client (macOS/Linux)
-
 ```bash
 bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)
 ```
 
-### Server (Linux)
-
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install-server.sh)
-```
+- Pick a language, then choose to install the **client** (macOS/Linux) or **server** (Linux).
+- Non-interactive examples:
+  - Client: `bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --client`
+  - Server: `bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --server`
 
 ### Uninstall
 ```bash

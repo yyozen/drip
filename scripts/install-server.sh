@@ -1015,7 +1015,11 @@ show_completion() {
 main() {
     clear
     print_banner
-    select_language
+    if [[ "$SKIP_LANG_PROMPT" == "true" ]]; then
+        LANG_CODE="${LANG_CODE:-en}"
+    else
+        select_language
+    fi
 
     echo -e "${BOLD}────────────────────────────────────────────${NC}"
 
@@ -1026,12 +1030,12 @@ main() {
     check_existing_install
 
     echo ""
-download_binary
-install_binary
-ensure_command_access
+    download_binary
+    install_binary
+    ensure_command_access
 
-# If updating, check if systemd service exists
-if [[ "$IS_UPDATE" == true ]]; then
+    # If updating, check if systemd service exists
+    if [[ "$IS_UPDATE" == true ]]; then
         # Check if systemd service file exists
         if [[ -f /etc/systemd/system/drip-server.service ]]; then
             echo ""

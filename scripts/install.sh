@@ -1,186 +1,80 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# ============================================================================
-# Configuration
-# ============================================================================
+# Unified installer wrapper for Drip client and server
+# Chooses language first, then lets the user pick client or server.
+
 GITHUB_REPO="Gouryella/drip"
-INSTALL_DIR="${INSTALL_DIR:-}"
-VERSION="${VERSION:-}"
-BINARY_NAME="drip"
-UNINSTALL_MODE=false
-COMMAND_MADE_AVAILABLE=false
+RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/${GITHUB_REPO}/main/scripts}"
+
+LANG_CODE="${LANG_CODE:-}"
+TARGET=""
+TARGET_ARGS=()
 
 # Colors
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Language (default: en)
-LANG_CODE="${LANG_CODE:-en}"
+SCRIPT_DIR=""
+if SCRIPT_DIR_TMP=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd 2>/dev/null); then
+    SCRIPT_DIR="$SCRIPT_DIR_TMP"
+fi
 
 # ============================================================================
 # Internationalization
 # ============================================================================
 msg_en() {
     case "$1" in
-        banner_title) echo "Drip Client - One-Click Installer" ;;
-        select_lang) echo "Select language / 选择语言" ;;
-        lang_en) echo "English" ;;
-        lang_zh) echo "中文" ;;
-        checking_os) echo "Checking operating system..." ;;
-        detected_os) echo "Detected OS" ;;
-        unsupported_os) echo "Unsupported operating system" ;;
-        checking_arch) echo "Checking system architecture..." ;;
-        detected_arch) echo "Detected architecture" ;;
-        unsupported_arch) echo "Unsupported architecture" ;;
-        checking_deps) echo "Checking dependencies..." ;;
-        deps_ok) echo "Dependencies check passed" ;;
-        downloading) echo "Downloading Drip client" ;;
-        download_failed) echo "Download failed" ;;
-        download_ok) echo "Download completed" ;;
-        select_install_dir) echo "Select installation directory" ;;
-        option_user) echo "User directory (no sudo required)" ;;
-        option_system) echo "System directory (requires sudo)" ;;
-        option_current) echo "Current directory" ;;
-        option_custom) echo "Custom path" ;;
-        enter_custom_path) echo "Enter custom path" ;;
-        installing) echo "Installing binary..." ;;
-        install_ok) echo "Installation completed" ;;
-        updating_path) echo "Updating PATH..." ;;
-        path_updated) echo "PATH updated" ;;
-        path_note) echo "Please restart your terminal or run: source ~/.bashrc" ;;
-        config_title) echo "Client Configuration" ;;
-        configure_now) echo "Configure client now?" ;;
-        enter_server) echo "Enter server address (e.g., tunnel.example.com:8443)" ;;
-        server_required) echo "Server address is required" ;;
-        enter_token) echo "Enter authentication token" ;;
-        token_required) echo "Token is required" ;;
-        skip_verify) echo "Skip TLS certificate verification? (for self-signed certs)" ;;
-        config_saved) echo "Configuration saved" ;;
-        install_complete) echo "Installation completed!" ;;
-        usage_title) echo "Usage" ;;
-        usage_http) echo "Expose HTTP service on port 3000" ;;
-        usage_tcp) echo "Expose TCP service on port 5432" ;;
-        usage_config) echo "Show/modify configuration" ;;
-        usage_daemon) echo "Run as background daemon" ;;
-        run_test) echo "Test connection now?" ;;
-        test_running) echo "Testing connection..." ;;
-        test_success) echo "Connection successful" ;;
-        test_failed) echo "Connection failed" ;;
-        yes) echo "y" ;;
-        no) echo "n" ;;
-        press_enter) echo "Press Enter to continue..." ;;
-        windows_note) echo "For Windows, please download the .exe file from GitHub Releases" ;;
-        already_installed) echo "Drip is already installed" ;;
-        current_version) echo "Current version" ;;
-        update_now) echo "Update to the latest version?" ;;
-        updating) echo "Updating..." ;;
-        update_ok) echo "Update completed" ;;
-        verify_install) echo "Verifying installation..." ;;
-        verify_ok) echo "Verification passed" ;;
-        verify_failed) echo "Verification failed" ;;
-        insecure_note) echo "Only use --insecure for development/testing" ;;
-        uninstall_title) echo "Drip Client - Uninstall" ;;
-        uninstall_prompt) echo "Uninstall Drip client now?" ;;
-        uninstalling) echo "Uninstalling Drip client..." ;;
-        uninstall_done) echo "Uninstall completed" ;;
-        uninstall_not_found) echo "Drip is not installed" ;;
-        remove_config_prompt) echo "Remove Drip config directory as well?" ;;
-        config_removed) echo "Config removed" ;;
-        path_cleanup) echo "Cleaning PATH entries..." ;;
-        path_cleanup_done) echo "PATH entries cleaned" ;;
-        *) echo "$1" ;;
+        banner_title) echo "Drip Installer";;
+        select_lang) echo "Select language / 选择语言";;
+        lang_en) echo "English";;
+        lang_zh) echo "中文";;
+        select_target) echo "Select install target";;
+        target_client) echo "Client";;
+        target_server) echo "Server";;
+        invalid_choice) echo "Invalid choice, using default";;
+        downloading_installer) echo "Downloading installer script...";;
+        download_failed) echo "Failed to download installer script";;
+        help_title) echo "Usage";;
+        help_line1) echo "  install.sh [--lang en|zh] [--client|--server] [args...]";;
+        help_line2) echo "Arguments after the target are passed to the installer (e.g. --uninstall for client).";;
+        *) echo "$1";;
     esac
 }
 
 msg_zh() {
     case "$1" in
-        banner_title) echo "Drip 客户端 - 一键安装脚本" ;;
-        select_lang) echo "Select language / 选择语言" ;;
-        lang_en) echo "English" ;;
-        lang_zh) echo "中文" ;;
-        checking_os) echo "检查操作系统..." ;;
-        detected_os) echo "检测到操作系统" ;;
-        unsupported_os) echo "不支持的操作系统" ;;
-        checking_arch) echo "检查系统架构..." ;;
-        detected_arch) echo "检测到架构" ;;
-        unsupported_arch) echo "不支持的架构" ;;
-        checking_deps) echo "检查依赖..." ;;
-        deps_ok) echo "依赖检查通过" ;;
-        downloading) echo "下载 Drip 客户端" ;;
-        download_failed) echo "下载失败" ;;
-        download_ok) echo "下载完成" ;;
-        select_install_dir) echo "选择安装目录" ;;
-        option_user) echo "用户目录（无需 sudo）" ;;
-        option_system) echo "系统目录（需要 sudo）" ;;
-        option_current) echo "当前目录" ;;
-        option_custom) echo "自定义路径" ;;
-        enter_custom_path) echo "输入自定义路径" ;;
-        installing) echo "安装二进制文件..." ;;
-        install_ok) echo "安装完成" ;;
-        updating_path) echo "更新 PATH..." ;;
-        path_updated) echo "PATH 已更新" ;;
-        path_note) echo "请重启终端或运行: source ~/.bashrc" ;;
-        config_title) echo "客户端配置" ;;
-        configure_now) echo "现在配置客户端？" ;;
-        enter_server) echo "输入服务器地址（例如：tunnel.example.com:8443）" ;;
-        server_required) echo "服务器地址是必填项" ;;
-        enter_token) echo "输入认证令牌" ;;
-        token_required) echo "认证令牌是必填项" ;;
-        skip_verify) echo "跳过 TLS 证书验证？（用于自签名证书）" ;;
-        config_saved) echo "配置已保存" ;;
-        install_complete) echo "安装完成！" ;;
-        usage_title) echo "使用方法" ;;
-        usage_http) echo "暴露本地 3000 端口的 HTTP 服务" ;;
-        usage_tcp) echo "暴露本地 5432 端口的 TCP 服务" ;;
-        usage_config) echo "显示/修改配置" ;;
-        usage_daemon) echo "作为后台守护进程运行" ;;
-        run_test) echo "现在测试连接？" ;;
-        test_running) echo "正在测试连接..." ;;
-        test_success) echo "连接成功" ;;
-        test_failed) echo "连接失败" ;;
-        yes) echo "y" ;;
-        no) echo "n" ;;
-        press_enter) echo "按 Enter 继续..." ;;
-        windows_note) echo "Windows 用户请从 GitHub Releases 下载 .exe 文件" ;;
-        already_installed) echo "Drip 已安装" ;;
-        current_version) echo "当前版本" ;;
-        update_now) echo "是否更新到最新版本？" ;;
-        updating) echo "正在更新..." ;;
-        update_ok) echo "更新完成" ;;
-        verify_install) echo "验证安装..." ;;
-        verify_ok) echo "验证通过" ;;
-        verify_failed) echo "验证失败" ;;
-        insecure_note) echo "--insecure 仅用于开发/测试环境" ;;
-        uninstall_title) echo "Drip 客户端 - 卸载" ;;
-        uninstall_prompt) echo "现在卸载 Drip 客户端？" ;;
-        uninstalling) echo "正在卸载 Drip 客户端..." ;;
-        uninstall_done) echo "卸载完成" ;;
-        uninstall_not_found) echo "未检测到已安装的 Drip" ;;
-        remove_config_prompt) echo "是否同时删除 Drip 配置目录？" ;;
-        config_removed) echo "配置已删除" ;;
-        path_cleanup) echo "清理 PATH 相关配置..." ;;
-        path_cleanup_done) echo "PATH 配置已清理" ;;
-        *) echo "$1" ;;
+        banner_title) echo "Drip 安装器";;
+        select_lang) echo "Select language / 选择语言";;
+        lang_en) echo "English";;
+        lang_zh) echo "中文";;
+        select_target) echo "选择安装目标";;
+        target_client) echo "客户端";;
+        target_server) echo "服务器";;
+        invalid_choice) echo "输入无效，使用默认选项";;
+        downloading_installer) echo "正在下载安装脚本...";;
+        download_failed) echo "下载安装脚本失败";;
+        help_title) echo "用法";;
+        help_line1) echo "  install.sh [--lang en|zh] [--client|--server] [args...]";;
+        help_line2) echo "目标之后的参数会透传给对应安装脚本（例如客户端的 --uninstall）。";;
+        *) echo "$1";;
     esac
 }
 
-# Get message by key (bash 3.2 compatible)
 msg() {
-    local key="$1"
     if [[ "$LANG_CODE" == "zh" ]]; then
-        msg_zh "$key"
+        msg_zh "$1"
     else
-        msg_en "$key"
+        msg_en "$1"
     fi
 }
 
-# Prompt helper compatible with bash 3.2 and zsh
+# ============================================================================
+# Helpers
+# ============================================================================
 prompt_input() {
     local __prompt="$1"
     local __var_name="$2"
@@ -188,53 +82,6 @@ prompt_input() {
     IFS= read -r "$__var_name" < /dev/tty
 }
 
-# ============================================================================
-# Output functions
-# ============================================================================
-print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-print_error() { echo -e "${RED}[✗]${NC} $1"; }
-print_step() { echo -e "${CYAN}[→]${NC} $1"; }
-
-repeat_char() {
-    local char="$1"
-    local count="$2"
-    local out=""
-    for _ in $(seq 1 "$count"); do
-        out+="$char"
-    done
-    echo "$out"
-}
-
-print_panel() {
-    local title="$1"
-    shift
-    local width=58
-    local bar
-    bar=$(repeat_char "=" "$width")
-    echo ""
-    echo -e "${CYAN}${bar}${NC}"
-    echo -e "${CYAN}${title}${NC}"
-    echo -e "${CYAN}${bar}${NC}"
-    for line in "$@"; do
-        echo -e "  $line"
-    done
-    echo -e "${CYAN}${bar}${NC}"
-    echo ""
-}
-
-print_subheader() {
-    local title="$1"
-    local width=58
-    local bar
-    bar=$(repeat_char "-" "$width")
-    echo ""
-    echo -e "${CYAN}${title}${NC}"
-    echo -e "${CYAN}${bar}${NC}"
-}
-
-# Print banner
 print_banner() {
     echo -e "${GREEN}"
     cat << "EOF"
@@ -249,608 +96,152 @@ EOF
     echo ""
 }
 
-# Extract version from a drip binary, preferring the plain output when available
-get_version_from_binary() {
-    local binary="$1"
-    local output=""
-    local version=""
-
-    output=$("$binary" version --short 2>/dev/null || true)
-    if [[ -n "$output" ]]; then
-        version=$(printf '%s\n' "$output" | awk -F': ' '/Version/ {print $2; exit}')
-    fi
-
-    if [[ -z "$version" ]]; then
-        output=$("$binary" version 2>/dev/null || true)
-        if [[ -n "$output" ]]; then
-            output=$(printf '%s\n' "$output" | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g')
-            version=$(printf '%s\n' "$output" | sed -nE 's/.*Version:[[:space:]]*([vV]?[0-9][^[:space:]]*).*/\1/p' | head -n1)
-        fi
-    fi
-
-    echo "${version:-unknown}"
+usage() {
+    echo -e "${BOLD}$(msg help_title):${NC}"
+    echo "$(msg help_line1)"
+    echo "$(msg help_line2)"
 }
 
 # ============================================================================
-# Language selection
+# Selection
 # ============================================================================
 select_language() {
-    print_panel "$(msg select_lang)" \
-        "${GREEN}1)${NC} English" \
-        "${GREEN}2)${NC} 中文"
+    echo -e "${CYAN}$(msg select_lang)${NC}"
+    echo -e "  ${GREEN}1)${NC} $(msg lang_en)"
+    echo -e "  ${GREEN}2)${NC} $(msg lang_zh)"
 
     prompt_input "Select [1]: " lang_choice
     case "$lang_choice" in
-        2)
-            LANG_CODE="zh"
-            ;;
-        *)
-            LANG_CODE="en"
-            ;;
+        2) LANG_CODE="zh" ;;
+        1|"") LANG_CODE="en" ;;
+        *) LANG_CODE="en";;
+    esac
+    echo ""
+}
+
+select_target() {
+    echo -e "${CYAN}$(msg select_target)${NC}"
+    echo -e "  ${GREEN}1)${NC} $(msg target_client)"
+    echo -e "  ${GREEN}2)${NC} $(msg target_server)"
+
+    prompt_input "Select [1]: " target_choice
+    case "$target_choice" in
+        2) TARGET="server" ;;
+        1|"") TARGET="client" ;;
+        *) echo -e "${YELLOW}$(msg invalid_choice)${NC}"; TARGET="client" ;;
     esac
     echo ""
 }
 
 # ============================================================================
-# System checks
+# Runner helpers
 # ============================================================================
-check_os() {
-    print_step "$(msg checking_os)"
+download_and_run() {
+    local url="$1"
+    shift
 
-    case "$(uname -s)" in
-        Linux*)
-            OS="linux"
-            ;;
-        Darwin*)
-            OS="darwin"
-            ;;
-        MINGW*|MSYS*|CYGWIN*)
-            OS="windows"
-            print_warning "$(msg windows_note)"
-            ;;
-        *)
-            print_error "$(msg unsupported_os): $(uname -s)"
+    echo -e "${CYAN}$(msg downloading_installer)${NC} $url"
+
+    local tmp_file
+    tmp_file=$(mktemp "/tmp/drip-install-XXXX")
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL "$url" -o "$tmp_file"; then
+            echo -e "${YELLOW}$(msg download_failed): $url${NC}"
             exit 1
-            ;;
-    esac
-
-    print_success "$(msg detected_os): $OS"
-}
-
-check_arch() {
-    print_step "$(msg checking_arch)"
-
-    case "$(uname -m)" in
-        x86_64|amd64)
-            ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            ARCH="arm64"
-            ;;
-        armv7l)
-            ARCH="arm"
-            ;;
-        i386|i686)
-            ARCH="386"
-            ;;
-        *)
-            print_error "$(msg unsupported_arch): $(uname -m)"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -qO "$tmp_file" "$url"; then
+            echo -e "${YELLOW}$(msg download_failed): $url${NC}"
             exit 1
-            ;;
-    esac
-
-    print_success "$(msg detected_arch): $ARCH"
-}
-
-check_dependencies() {
-    print_step "$(msg checking_deps)"
-
-    # Check for download tool
-    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
-        print_error "curl or wget is required"
+        fi
+    else
+        echo "curl or wget is required"
         exit 1
-    fi
-
-    print_success "$(msg deps_ok)"
-}
-
-get_latest_version() {
-    # Get latest version from GitHub API
-    local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-    local version=""
-
-    if command -v curl &> /dev/null; then
-        version=$(curl -fsSL "$api_url" | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' 2>/dev/null)
-    else
-        version=$(wget -qO- "$api_url" | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' 2>/dev/null)
-    fi
-
-    if [[ -z "$version" ]]; then
-        print_error "Failed to get latest version from GitHub"
-        exit 1
-    fi
-
-    echo "$version"
-}
-
-
-check_existing_install() {
-    if command -v drip &> /dev/null; then
-        local current_path=$(command -v drip)
-        local current_version=$(get_version_from_binary "drip")
-
-        print_warning "$(msg already_installed): $current_path"
-        print_info "$(msg current_version): $current_version"
-
-        # Check remote version
-        print_step "Checking for updates..."
-        local latest_version=$(get_latest_version)
-
-        if [[ "$current_version" == "$latest_version" ]]; then
-            print_success "Already up to date ($current_version)"
-            exit 0
-        else
-            print_info "Latest version: $latest_version"
-            echo ""
-            prompt_input "$(msg update_now) [Y/n]: " update_choice
-        fi
-
-        if [[ "$update_choice" =~ ^[Nn]$ ]]; then
-            exit 0
-        fi
-
-        INSTALL_DIR=$(dirname "$current_path")
-        IS_UPDATE=true
-    fi
-}
-
-# ============================================================================
-# Download and install
-# ============================================================================
-get_download_url() {
-    # Get latest version if not set
-    if [[ -z "$VERSION" ]]; then
-        VERSION=$(get_latest_version)
-    fi
-
-    local binary_name
-
-    if [[ "$OS" == "windows" ]]; then
-        binary_name="drip-${VERSION}-windows-${ARCH}.exe"
-    else
-        binary_name="drip-${VERSION}-${OS}-${ARCH}"
-    fi
-
-    echo "https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/${binary_name}"
-}
-
-download_binary() {
-    local url=$(get_download_url)
-
-    if [[ "$IS_UPDATE" == true ]]; then
-        print_step "$(msg updating)..."
-    else
-        print_step "$(msg downloading)..."
-    fi
-
-    local tmp_file="/tmp/drip-download"
-
-    if command -v curl &> /dev/null; then
-        # Use -# for progress bar instead of -s (silent)
-        if ! curl -f#L "$url" -o "$tmp_file"; then
-            print_error "$(msg download_failed): $url"
-            exit 1
-        fi
-    else
-        # Use --show-progress to display download progress
-        if ! wget --show-progress "$url" -O "$tmp_file" 2>&1 | grep -v "^$"; then
-            print_error "$(msg download_failed): $url"
-            exit 1
-        fi
     fi
 
     chmod +x "$tmp_file"
-    print_success "$(msg download_ok)"
+    LANG_CODE="$LANG_CODE" SKIP_LANG_PROMPT=true "$tmp_file" "$@"
+    rm -f "$tmp_file"
 }
 
-select_install_dir() {
-    if [[ -n "$INSTALL_DIR" ]]; then
-        return
+run_client() {
+    local local_script=""
+    if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/install-client.sh" ]]; then
+        local_script="${SCRIPT_DIR}/install-client.sh"
     fi
 
-    print_panel "$(msg select_install_dir)" \
-        "${GREEN}1)${NC} ~/.local/bin $(msg option_user)" \
-        "${GREEN}2)${NC} /usr/local/bin $(msg option_system)" \
-        "${GREEN}3)${NC} ./ $(msg option_current)" \
-        "${GREEN}4)${NC} $(msg option_custom)"
-
-    prompt_input "Select [1]: " dir_choice
-
-    case "$dir_choice" in
-        2)
-            INSTALL_DIR="/usr/local/bin"
-            NEED_SUDO=true
-            ;;
-        3)
-            INSTALL_DIR="."
-            ;;
-        4)
-            prompt_input "$(msg enter_custom_path): " INSTALL_DIR
-            ;;
-        *)
-            INSTALL_DIR="$HOME/.local/bin"
-            ;;
-    esac
-}
-
-install_binary() {
-    print_step "$(msg installing)"
-
-    # Create directory if needed
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        if [[ "$NEED_SUDO" == true ]]; then
-            sudo mkdir -p "$INSTALL_DIR"
-        else
-            mkdir -p "$INSTALL_DIR"
-        fi
-    fi
-
-    local target_path="$INSTALL_DIR/$BINARY_NAME"
-    if [[ "$OS" == "windows" ]]; then
-        target_path="$INSTALL_DIR/$BINARY_NAME.exe"
-    fi
-
-    # Install binary
-    if [[ "$NEED_SUDO" == true ]]; then
-        sudo mv /tmp/drip-download "$target_path"
-        sudo chmod +x "$target_path"
+    if [[ -n "$local_script" ]]; then
+        LANG_CODE="$LANG_CODE" SKIP_LANG_PROMPT=true "$local_script" "${TARGET_ARGS[@]}"
     else
-        mv /tmp/drip-download "$target_path"
-        chmod +x "$target_path"
+        download_and_run "${RAW_BASE}/install-client.sh" "${TARGET_ARGS[@]}"
     fi
-
-    print_success "$(msg install_ok): $target_path"
 }
 
-update_path() {
-    # Skip if already in PATH
-    if command -v drip &> /dev/null; then
-        return
-    fi
-    if [[ "$COMMAND_MADE_AVAILABLE" == true ]]; then
-        return
+run_server() {
+    local local_script=""
+    if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/install-server.sh" ]]; then
+        local_script="${SCRIPT_DIR}/install-server.sh"
     fi
 
-    # Skip for system directories (usually already in PATH)
-    if [[ "$INSTALL_DIR" == "/usr/local/bin" ]] || [[ "$INSTALL_DIR" == "/usr/bin" ]]; then
-        return
-    fi
-
-    print_step "$(msg updating_path)"
-
-    local shell_rc=""
-    local export_line="export PATH=\"\$PATH:$INSTALL_DIR\""
-
-    # Determine shell config file
-    if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
-        shell_rc="$HOME/.zshrc"
-    elif [[ -n "$BASH_VERSION" ]] || [[ "$SHELL" == *"bash"* ]]; then
-        if [[ "$OS" == "darwin" ]]; then
-            shell_rc="$HOME/.bash_profile"
-        else
-            shell_rc="$HOME/.bashrc"
-        fi
-    elif [[ "$SHELL" == *"fish"* ]]; then
-        shell_rc="$HOME/.config/fish/config.fish"
-        export_line="set -gx PATH \$PATH $INSTALL_DIR"
-    fi
-
-    if [[ -n "$shell_rc" ]]; then
-        # Check if already added
-        if ! grep -q "$INSTALL_DIR" "$shell_rc" 2>/dev/null; then
-            echo "" >> "$shell_rc"
-            echo "# Drip client" >> "$shell_rc"
-            echo "$export_line" >> "$shell_rc"
-            print_success "$(msg path_updated): $shell_rc"
-        fi
-    fi
-
-    print_warning "$(msg path_note)"
-}
-
-ensure_command_access() {
-    # Try to make the command available immediately without requiring shell restart
-    if [[ "$OS" == "windows" ]]; then
-        return
-    fi
-
-    hash -r 2>/dev/null || true
-    command -v rehash >/dev/null 2>&1 && rehash || true
-
-    if command -v "$BINARY_NAME" >/dev/null 2>&1; then
-        COMMAND_MADE_AVAILABLE=true
-        return
-    fi
-
-    local target_path="$INSTALL_DIR/$BINARY_NAME"
-    local preferred="/usr/local/bin"
-
-    if [[ ":$PATH:" == *":$preferred:"* ]]; then
-        if [[ -w "$preferred" ]]; then
-            if ln -sf "$target_path" "$preferred/$BINARY_NAME" 2>/dev/null; then
-                COMMAND_MADE_AVAILABLE=true
-                print_success "Made ${BINARY_NAME} available at $preferred/$BINARY_NAME"
-            fi
-        else
-            if sudo ln -sf "$target_path" "$preferred/$BINARY_NAME" 2>/dev/null; then
-                COMMAND_MADE_AVAILABLE=true
-                print_success "Made ${BINARY_NAME} available at $preferred/$BINARY_NAME"
-            fi
-        fi
-    fi
-
-    # Refresh hash table
-    hash -r 2>/dev/null || true
-    command -v rehash >/dev/null 2>&1 && rehash || true
-}
-
-verify_installation() {
-    print_step "$(msg verify_install)"
-
-    local binary_path="$INSTALL_DIR/$BINARY_NAME"
-    if [[ "$OS" == "windows" ]]; then
-        binary_path="$INSTALL_DIR/$BINARY_NAME.exe"
-    fi
-
-    if [[ -x "$binary_path" ]]; then
-        local version=$(get_version_from_binary "$binary_path")
-        print_success "$(msg verify_ok): $version"
+    if [[ -n "$local_script" ]]; then
+        LANG_CODE="$LANG_CODE" SKIP_LANG_PROMPT=true "$local_script" "${TARGET_ARGS[@]}"
     else
-        print_error "$(msg verify_failed)"
-        exit 1
+        download_and_run "${RAW_BASE}/install-server.sh" "${TARGET_ARGS[@]}"
     fi
-}
-
-# ============================================================================
-# Configuration
-# ============================================================================
-configure_client() {
-    echo ""
-    prompt_input "$(msg configure_now) [Y/n]: " config_choice
-
-    if [[ "$config_choice" =~ ^[Nn]$ ]]; then
-        return
-    fi
-
-    print_subheader "$(msg config_title)"
-
-    local binary_path="$INSTALL_DIR/$BINARY_NAME"
-
-    # Server address
-    while true; do
-        prompt_input "$(msg enter_server): " SERVER
-        if [[ -n "$SERVER" ]]; then
-            break
-        fi
-        print_error "$(msg server_required)"
-    done
-
-    # Token
-    while true; do
-        prompt_input "$(msg enter_token): " TOKEN
-        if [[ -n "$TOKEN" ]]; then
-            break
-        fi
-        print_error "$(msg token_required)"
-    done
-
-    # Insecure mode
-    prompt_input "$(msg skip_verify) [y/N]: " insecure_choice
-    INSECURE=""
-    if [[ "$insecure_choice" =~ ^[Yy]$ ]]; then
-        INSECURE="--insecure"
-        print_warning "$(msg insecure_note)"
-    fi
-
-    # Save configuration
-    "$binary_path" config set --server "$SERVER" --token "$TOKEN" $INSECURE 2>/dev/null || true
-
-    print_success "$(msg config_saved)"
-}
-
-# ============================================================================
-# Test connection
-# ============================================================================
-test_connection() {
-    echo ""
-    prompt_input "$(msg run_test) [y/N]: " test_choice
-
-    if [[ ! "$test_choice" =~ ^[Yy]$ ]]; then
-        return
-    fi
-
-    print_step "$(msg test_running)"
-
-    local binary_path="$INSTALL_DIR/$BINARY_NAME"
-
-    # Try to validate config
-    if "$binary_path" config validate 2>/dev/null; then
-        print_success "$(msg test_success)"
-    else
-        print_warning "$(msg test_failed)"
-    fi
-}
-
-# ============================================================================
-# Final output
-# ============================================================================
-show_completion() {
-    local binary_path="$INSTALL_DIR/$BINARY_NAME"
-
-    print_panel "$(msg install_complete)"
-
-    echo -e "${CYAN}$(msg usage_title):${NC}"
-    echo ""
-    echo -e "  ${GREEN}# $(msg usage_http)${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME http 3000${NC}"
-    echo ""
-    echo -e "  ${GREEN}# $(msg usage_tcp)${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME tcp 5432${NC}"
-    echo ""
-    echo -e "  ${GREEN}# $(msg usage_config)${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME config show${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME config init${NC}"
-    echo ""
-    echo -e "  ${GREEN}# $(msg usage_daemon)${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME daemon start http 3000${NC}"
-    echo -e "  ${YELLOW}$BINARY_NAME daemon list${NC}"
-    echo ""
-}
-
-# ============================================================================
-# Uninstall
-# ============================================================================
-cleanup_path_entries() {
-    local install_dir="$1"
-
-    local candidates=()
-
-    local os_name="$OS"
-    if [[ -z "$os_name" ]]; then
-        case "$(uname -s)" in
-            Darwin*) os_name="darwin" ;;
-            *) os_name="linux" ;;
-        esac
-    fi
-
-    # Determine shell config files
-    if [[ -n "$ZSH_VERSION" ]] || [[ "$SHELL" == *"zsh"* ]]; then
-        candidates+=("$HOME/.zshrc")
-    fi
-    if [[ -n "$BASH_VERSION" ]] || [[ "$SHELL" == *"bash"* ]]; then
-        if [[ "$os_name" == "darwin" ]]; then
-            candidates+=("$HOME/.bash_profile")
-        else
-            candidates+=("$HOME/.bashrc")
-        fi
-    fi
-    if [[ "$SHELL" == *"fish"* ]]; then
-        candidates+=("$HOME/.config/fish/config.fish")
-    fi
-
-    for file in "${candidates[@]}"; do
-        if [[ -f "$file" ]] && grep -q "$install_dir" "$file" 2>/dev/null; then
-            local tmp
-            tmp=$(mktemp)
-            # Remove the comment marker and PATH export line we added
-            grep -v "Drip client" "$file" | grep -v "$install_dir" > "$tmp" || true
-            mv "$tmp" "$file"
-        fi
-    done
-}
-
-remove_config_dirs() {
-    local removed=false
-    local dirs=("$HOME/.drip" "$HOME/.config/drip")
-
-    echo ""
-    prompt_input "$(msg remove_config_prompt) [y/N]: " remove_choice
-    if [[ ! "$remove_choice" =~ ^[Yy]$ ]]; then
-        return
-    fi
-
-    for dir in "${dirs[@]}"; do
-        if [[ -d "$dir" ]]; then
-            rm -rf "$dir"
-            removed=true
-        fi
-    done
-
-    if [[ "$removed" == true ]]; then
-        print_success "$(msg config_removed)"
-    fi
-}
-
-uninstall_client() {
-    if ! command -v drip &> /dev/null; then
-        print_warning "$(msg uninstall_not_found)"
-        return
-    fi
-
-    local current_path
-    current_path=$(command -v drip)
-
-    prompt_input "$(msg uninstall_prompt) [y/N]: " confirm_uninstall
-    if [[ ! "$confirm_uninstall" =~ ^[Yy]$ ]]; then
-        return
-    fi
-
-    print_step "$(msg uninstalling)"
-
-    if [[ -w "$current_path" ]]; then
-        rm -f "$current_path" || true
-    else
-        sudo rm -f "$current_path" || true
-    fi
-
-    print_success "$(msg uninstall_done)"
-
-    local install_dir
-    install_dir=$(dirname "$current_path")
-    print_step "$(msg path_cleanup)"
-    cleanup_path_entries "$install_dir"
-    print_success "$(msg path_cleanup_done)"
-
-    remove_config_dirs
 }
 
 # ============================================================================
 # Main
 # ============================================================================
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lang)
+                if [[ $# -ge 2 ]]; then
+                    LANG_CODE="$2"
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
+            --client|client|-c)
+                TARGET="client"
+                shift
+                ;;
+            --server|server|-s)
+                TARGET="server"
+                shift
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                TARGET_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
+}
+
 main() {
-    if [[ "$1" == "--uninstall" || "$1" == "uninstall" ]]; then
-        UNINSTALL_MODE=true
-    fi
+    parse_args "$@"
 
     clear
     print_banner
-    select_language
 
-    echo -e "${BOLD}────────────────────────────────────────────${NC}"
+    [[ -z "$LANG_CODE" ]] && select_language
+    [[ -z "$TARGET" ]] && select_target
 
-    if [[ "$UNINSTALL_MODE" == true ]]; then
-        uninstall_client
-        exit 0
-    fi
+    # Default to English if someone skips selection without setting LANG_CODE
+    LANG_CODE="${LANG_CODE:-en}"
 
-    check_os
-    check_arch
-    check_dependencies
-    check_existing_install
-
-    echo ""
-    download_binary
-    select_install_dir
-    install_binary
-    ensure_command_access
-    update_path
-    verify_installation
-
-    # Skip configuration for updates
-    if [[ "$IS_UPDATE" != true ]]; then
-        configure_client
-        test_connection
+    if [[ "$TARGET" == "server" ]]; then
+        run_server
     else
-        echo ""
-        local new_version=$(get_version_from_binary "$INSTALL_DIR/$BINARY_NAME")
-        print_panel "$(msg update_ok)"
-        print_info "Version: $new_version"
-        echo ""
-        return
+        run_client
     fi
-
-    show_completion
 }
 
-# Run
 main "$@"
