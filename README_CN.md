@@ -15,17 +15,13 @@
   <a href="README_CN.md">中文文档</a>
 </p>
 
-<p align="center">
-  <a href="https://golang.org/">
-    <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go" alt="Go Version" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/License-BSD--3--Clause-blue.svg" alt="License" />
-  </a>
-  <a href="https://tools.ietf.org/html/rfc8446">
-    <img src="https://img.shields.io/badge/TLS-1.3-green.svg" alt="TLS" />
-  </a>
-</p>
+<div align="center">
+
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![License](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
+[![TLS](https://img.shields.io/badge/TLS-1.3-green.svg)](https://tools.ietf.org/html/rfc8446)
+
+</div>
 
 > Drip 是一条安静、自律的隧道。  
 > 你在自己的网络里点亮一盏小灯，它便把光带出去——经过你自己的基础设施，按你自己的方式。
