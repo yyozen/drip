@@ -44,6 +44,10 @@ type Connection struct {
 	tunnelType    protocol.TunnelType // Track tunnel type
 	ctx           context.Context
 	cancel        context.CancelFunc
+
+	// Flow control
+	paused    bool
+	pauseCond *sync.Cond
 }
 
 // HTTPResponseHandler interface for response channel operations
@@ -60,6 +64,7 @@ type HTTPResponseHandler interface {
 // NewConnection creates a new connection handler
 func NewConnection(conn net.Conn, authToken string, manager *tunnel.Manager, logger *zap.Logger, portAlloc *PortAllocator, domain string, publicPort int, httpHandler http.Handler, responseChans HTTPResponseHandler) *Connection {
 	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.RWMutex
 	return &Connection{
 		conn:          conn,
 		authToken:     authToken,
@@ -74,6 +79,7 @@ func NewConnection(conn net.Conn, authToken string, manager *tunnel.Manager, log
 		lastHeartbeat: time.Now(),
 		ctx:           ctx,
 		cancel:        cancel,
+		pauseCond:     sync.NewCond(&mu),
 	}
 }
 
@@ -118,14 +124,15 @@ func (c *Connection) Handle() error {
 	if err != nil {
 		return fmt.Errorf("failed to read registration frame: %w", err)
 	}
-	defer frame.Release() // Return pool buffer when done
+	sf := protocol.WithFrame(frame)
+	defer sf.Close()
 
-	if frame.Type != protocol.FrameTypeRegister {
-		return fmt.Errorf("expected register frame, got %s", frame.Type)
+	if sf.Frame.Type != protocol.FrameTypeRegister {
+		return fmt.Errorf("expected register frame, got %s", sf.Frame.Type)
 	}
 
 	var req protocol.RegisterRequest
-	if err := json.Unmarshal(frame.Payload, &req); err != nil {
+	if err := json.Unmarshal(sf.Frame.Payload, &req); err != nil {
 		return fmt.Errorf("failed to parse registration request: %w", err)
 	}
 
@@ -390,25 +397,31 @@ func (c *Connection) handleFrames(reader *bufio.Reader) error {
 		}
 
 		// Handle frame based on type
-		switch frame.Type {
+		sf := protocol.WithFrame(frame)
+
+		switch sf.Frame.Type {
 		case protocol.FrameTypeHeartbeat:
 			c.handleHeartbeat()
-			frame.Release()
+			sf.Close()
 
 		case protocol.FrameTypeData:
 			// Data frame from client (response to forwarded request)
-			c.handleDataFrame(frame)
-			frame.Release() // Release after processing
+			c.handleDataFrame(sf.Frame)
+			sf.Close()
+
+		case protocol.FrameTypeFlowControl:
+			c.handleFlowControl(sf.Frame)
+			sf.Close()
 
 		case protocol.FrameTypeClose:
-			frame.Release()
+			sf.Close()
 			c.logger.Info("Client requested close")
 			return nil
 
 		default:
-			frame.Release()
+			sf.Close()
 			c.logger.Warn("Unexpected frame type",
-				zap.String("type", frame.Type.String()),
+				zap.String("type", sf.Frame.Type.String()),
 			)
 		}
 	}
@@ -574,6 +587,9 @@ func (c *Connection) SendFrame(frame *protocol.Frame) error {
 	if c.frameWriter == nil {
 		return protocol.WriteFrame(c.conn, frame)
 	}
+	if frame.Type == protocol.FrameTypeData {
+		return c.sendWithBackpressure(frame)
+	}
 	return c.frameWriter.WriteFrame(frame)
 }
 
@@ -680,4 +696,41 @@ func (w *httpResponseWriter) Write(data []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.writer.Write(data)
+}
+
+func (c *Connection) handleFlowControl(frame *protocol.Frame) {
+	msg, err := protocol.DecodeFlowControlMessage(frame.Payload)
+	if err != nil {
+		c.logger.Error("Failed to decode flow control", zap.Error(err))
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch msg.Action {
+	case protocol.FlowControlPause:
+		c.paused = true
+		c.logger.Warn("Client requested pause",
+			zap.String("stream", msg.StreamID))
+
+	case protocol.FlowControlResume:
+		c.paused = false
+		c.pauseCond.Broadcast()
+		c.logger.Info("Client requested resume",
+			zap.String("stream", msg.StreamID))
+
+	default:
+		c.logger.Warn("Unknown flow control action",
+			zap.String("action", string(msg.Action)))
+	}
+}
+
+func (c *Connection) sendWithBackpressure(frame *protocol.Frame) error {
+	c.mu.Lock()
+	for c.paused {
+		c.pauseCond.Wait()
+	}
+	c.mu.Unlock()
+	return c.frameWriter.WriteFrame(frame)
 }

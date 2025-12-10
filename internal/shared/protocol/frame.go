@@ -25,6 +25,7 @@ const (
 	FrameTypeData         FrameType = 0x05
 	FrameTypeClose        FrameType = 0x06
 	FrameTypeError        FrameType = 0x07
+	FrameTypeFlowControl  FrameType = 0x08
 )
 
 // String returns the string representation of frame type
@@ -44,6 +45,8 @@ func (t FrameType) String() string {
 		return "Close"
 	case FrameTypeError:
 		return "Error"
+	case FrameTypeFlowControl:
+		return "FlowControl"
 	default:
 		return fmt.Sprintf("Unknown(%d)", t)
 	}

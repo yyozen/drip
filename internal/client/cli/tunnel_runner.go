@@ -145,7 +145,7 @@ func runTunnelWithUI(connConfig *tcp.ConnectorConfig, daemonInfo *DaemonInfo) er
 			select {
 			case <-done:
 				// Closed successfully
-			case <-time.After(5 * time.Second):
+			case <-time.After(2 * time.Second):
 				fmt.Println(ui.Warning("Force closing (timeout)..."))
 			}
 

@@ -159,6 +159,7 @@ func (c *Connector) Connect() error {
 	}
 
 	go c.frameHandler.WarmupConnectionPool(3)
+	go c.monitorQueuePressure()
 	go c.handleFrames()
 
 	return nil
@@ -235,18 +236,15 @@ func (c *Connector) dataFrameWorker(workerID int) {
 			}
 
 			func() {
-				defer c.recoverer.RecoverWithCallback("handleDataFrame", func(p interface{}) {
-					if frame != nil {
-						frame.Release()
-					}
-				})
+				sf := protocol.WithFrame(frame)
+				defer sf.Close()
+				defer c.recoverer.Recover("handleDataFrame")
 
-				if err := c.frameHandler.HandleDataFrame(frame); err != nil {
+				if err := c.frameHandler.HandleDataFrame(sf.Frame); err != nil {
 					c.logger.Error("Failed to handle data frame",
 						zap.Int("worker_id", workerID),
 						zap.Error(err))
 				}
-				frame.Release()
 			}()
 
 		case <-c.stopCh:
@@ -282,7 +280,9 @@ func (c *Connector) handleFrames() {
 				return
 			}
 		}
-		switch frame.Type {
+		sf := protocol.WithFrame(frame)
+
+		switch sf.Frame.Type {
 		case protocol.FrameTypeHeartbeatAck:
 			c.heartbeatMu.Lock()
 			if !c.heartbeatSentAt.IsZero() {
@@ -299,39 +299,39 @@ func (c *Connector) handleFrames() {
 				c.heartbeatMu.Unlock()
 				c.logger.Debug("Received heartbeat ack")
 			}
-			frame.Release()
+			sf.Close()
 
 		case protocol.FrameTypeData:
 			select {
-			case c.dataFrameQueue <- frame:
+			case c.dataFrameQueue <- sf.Frame:
 			case <-c.stopCh:
-				frame.Release()
+				sf.Close()
 				return
 			default:
 				c.logger.Warn("Data frame queue full, dropping frame")
-				frame.Release()
+				sf.Close()
 			}
 
 		case protocol.FrameTypeClose:
-			frame.Release()
+			sf.Close()
 			c.logger.Info("Server requested close")
 			return
 
 		case protocol.FrameTypeError:
 			var errMsg protocol.ErrorMessage
-			if err := json.Unmarshal(frame.Payload, &errMsg); err == nil {
+			if err := json.Unmarshal(sf.Frame.Payload, &errMsg); err == nil {
 				c.logger.Error("Received error from server",
 					zap.String("code", errMsg.Code),
 					zap.String("message", errMsg.Message),
 				)
 			}
-			frame.Release()
+			sf.Close()
 			return
 
 		default:
-			frame.Release()
+			sf.Close()
 			c.logger.Warn("Unexpected frame type",
-				zap.String("type", frame.Type.String()),
+				zap.String("type", sf.Frame.Type.String()),
 			)
 		}
 	}
@@ -378,7 +378,7 @@ func (c *Connector) Close() error {
 
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(2 * time.Second):
 			c.logger.Warn("Force closing: some handlers are still active")
 		}
 
@@ -439,4 +439,55 @@ func (c *Connector) IsClosed() bool {
 	c.closedMu.RLock()
 	defer c.closedMu.RUnlock()
 	return c.closed
+}
+func (c *Connector) monitorQueuePressure() {
+	defer c.recoverer.Recover("monitorQueuePressure")
+
+	const (
+		pauseThreshold  = 0.80
+		resumeThreshold = 0.50
+		checkInterval   = 100 * time.Millisecond
+	)
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	isPaused := false
+
+	for {
+		select {
+		case <-ticker.C:
+			queueLen := len(c.dataFrameQueue)
+			queueCap := cap(c.dataFrameQueue)
+			usage := float64(queueLen) / float64(queueCap)
+
+			if usage > pauseThreshold && !isPaused {
+				c.sendFlowControl("*", protocol.FlowControlPause)
+				isPaused = true
+				c.logger.Warn("Queue pressure high, sent pause signal",
+					zap.Int("queue_len", queueLen),
+					zap.Int("queue_cap", queueCap),
+					zap.Float64("usage", usage))
+			} else if usage < resumeThreshold && isPaused {
+				c.sendFlowControl("*", protocol.FlowControlResume)
+				isPaused = false
+				c.logger.Info("Queue pressure normal, sent resume signal",
+					zap.Int("queue_len", queueLen),
+					zap.Int("queue_cap", queueCap),
+					zap.Float64("usage", usage))
+			}
+
+		case <-c.stopCh:
+			return
+		}
+	}
+}
+
+func (c *Connector) sendFlowControl(streamID string, action protocol.FlowControlAction) {
+	frame := protocol.NewFlowControlFrame(streamID, action)
+	if err := c.SendFrame(frame); err != nil {
+		c.logger.Error("Failed to send flow control",
+			zap.String("action", string(action)),
+			zap.Error(err))
+	}
 }
