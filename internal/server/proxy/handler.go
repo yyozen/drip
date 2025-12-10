@@ -604,8 +604,10 @@ func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>`
 
+	data := []byte(html)
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Write(data)
 }
 
 func (h *Handler) serveHealth(w http.ResponseWriter, r *http.Request) {
