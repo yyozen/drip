@@ -58,6 +58,12 @@ func runTunnelWithUI(connConfig *tcp.ConnectorConfig, daemonInfo *DaemonInfo) er
 		}
 
 		reconnectAttempts = 0
+		if assignedSubdomain := connector.GetSubdomain(); assignedSubdomain != "" {
+			connConfig.Subdomain = assignedSubdomain
+			if daemonInfo != nil {
+				daemonInfo.Subdomain = assignedSubdomain
+			}
+		}
 
 		if daemonInfo != nil {
 			daemonInfo.URL = connector.GetURL()

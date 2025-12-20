@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -131,15 +132,24 @@ func (c *Connection) Handle() error {
 			return fmt.Errorf("port allocator not configured")
 		}
 
-		port, err := c.portAlloc.Allocate()
-		if err != nil {
-			c.sendError("port_allocation_failed", err.Error())
-			return fmt.Errorf("failed to allocate port: %w", err)
-		}
-		c.port = port
+		if requestedPort, ok := parseTCPSubdomainPort(req.CustomSubdomain); ok {
+			port, err := c.portAlloc.AllocateSpecific(requestedPort)
+			if err != nil {
+				c.sendError("port_allocation_failed", err.Error())
+				return fmt.Errorf("failed to allocate requested port %d: %w", requestedPort, err)
+			}
+			c.port = port
+		} else {
+			port, err := c.portAlloc.Allocate()
+			if err != nil {
+				c.sendError("port_allocation_failed", err.Error())
+				return fmt.Errorf("failed to allocate port: %w", err)
+			}
+			c.port = port
 
-		if req.CustomSubdomain == "" {
-			req.CustomSubdomain = fmt.Sprintf("tcp-%d", port)
+			if req.CustomSubdomain == "" {
+				req.CustomSubdomain = fmt.Sprintf("tcp-%d", port)
+			}
 		}
 	}
 
@@ -381,6 +391,24 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func parseTCPSubdomainPort(subdomain string) (int, bool) {
+	if !strings.HasPrefix(subdomain, "tcp-") {
+		return 0, false
+	}
+
+	portStr := strings.TrimPrefix(subdomain, "tcp-")
+	if portStr == "" {
+		return 0, false
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, false
+	}
+
+	return port, true
 }
 
 func (c *Connection) handleFrames(reader *bufio.Reader) error {

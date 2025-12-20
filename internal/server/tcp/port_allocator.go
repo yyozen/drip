@@ -56,6 +56,28 @@ func (p *PortAllocator) Allocate() (int, error) {
 	return 0, fmt.Errorf("no available port in range %d-%d", p.min, p.max)
 }
 
+// AllocateSpecific reserves a specific port if it is within range and available.
+func (p *PortAllocator) AllocateSpecific(port int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if port < p.min || port > p.max {
+		return 0, fmt.Errorf("requested port %d outside range %d-%d", port, p.min, p.max)
+	}
+	if p.used[port] {
+		return 0, fmt.Errorf("requested port %d already in use", port)
+	}
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return 0, fmt.Errorf("requested port %d unavailable: %w", port, err)
+	}
+	_ = ln.Close()
+
+	p.used[port] = true
+	return port, nil
+}
+
 // Release frees a previously allocated port.
 func (p *PortAllocator) Release(port int) {
 	p.mu.Lock()
