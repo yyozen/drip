@@ -18,6 +18,7 @@ import (
 
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/constants"
+	"drip/internal/shared/mux"
 	"drip/internal/shared/protocol"
 
 	"go.uber.org/zap"
@@ -686,10 +687,8 @@ func (c *Connection) handleDataConnect(frame *protocol.Frame, reader *bufio.Read
 		reader: reader,
 	}
 
-	cfg := yamux.DefaultConfig()
-	cfg.EnableKeepAlive = false
-	cfg.LogOutput = io.Discard
-	cfg.AcceptBacklog = constants.YamuxAcceptBacklog
+	// Use optimized mux config for server
+	cfg := mux.NewServerConfig()
 
 	session, err := yamux.Client(bc, cfg)
 	if err != nil {

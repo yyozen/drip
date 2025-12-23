@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	json "github.com/goccy/go-json"
@@ -16,10 +17,18 @@ import (
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/httputil"
 	"drip/internal/shared/netutil"
+	"drip/internal/shared/pool"
 	"drip/internal/shared/protocol"
 
 	"go.uber.org/zap"
 )
+
+// bufio.Reader pool to reduce allocations on hot path
+var bufioReaderPool = sync.Pool{
+	New: func() interface{} {
+		return bufio.NewReaderSize(nil, 32*1024)
+	},
+}
 
 const openStreamTimeout = 3 * time.Second
 
@@ -104,13 +113,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := http.ReadResponse(bufio.NewReaderSize(countingStream, 32*1024), r)
+	reader := bufioReaderPool.Get().(*bufio.Reader)
+	reader.Reset(countingStream)
+	resp, err := http.ReadResponse(reader, r)
 	if err != nil {
+		bufioReaderPool.Put(reader)
 		w.Header().Set("Connection", "close")
 		http.Error(w, "Read response failed", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		resp.Body.Close()
+		bufioReaderPool.Put(reader)
+	}()
 
 	h.copyResponseHeaders(w.Header(), resp.Header, r.Host)
 
@@ -147,7 +162,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	_, _ = io.Copy(w, resp.Body)
+	// Use pooled buffer for zero-copy optimization
+	buf := pool.GetBuffer(pool.SizeLarge)
+	_, _ = io.CopyBuffer(w, resp.Body, (*buf)[:])
+	pool.PutBuffer(buf)
+
 	close(done)
 	stream.Close()
 }

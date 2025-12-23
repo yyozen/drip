@@ -115,8 +115,7 @@ func (c *Connection) GetTunnelType() protocol.TunnelType {
 	return c.tunnelType
 }
 
-// SetOpenStream registers a yamux stream opener for this tunnel.
-// It is used by the HTTP proxy to forward each request over a mux stream.
+// SetOpenStream registers a stream opener for this tunnel.
 func (c *Connection) SetOpenStream(open func() (net.Conn, error)) {
 	c.mu.Lock()
 	c.openStream = open
@@ -178,17 +177,11 @@ func (c *Connection) GetActiveConnections() int64 {
 
 // StartWritePump starts the write pump for sending messages
 func (c *Connection) StartWritePump() {
-	// Skip write pump for TCP-only connections (no WebSocket)
 	if c.Conn == nil {
-		c.logger.Debug("Skipping WritePump for TCP connection",
-			zap.String("subdomain", c.Subdomain),
-		)
-		// Still need to drain SendCh to prevent blocking
 		go func() {
 			for {
 				select {
 				case <-c.SendCh:
-					// Discard messages for TCP mode
 				case <-c.CloseCh:
 					return
 				}

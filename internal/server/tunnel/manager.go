@@ -2,7 +2,9 @@ package tunnel
 
 import (
 	"errors"
+	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"drip/internal/shared/utils"
@@ -12,10 +14,14 @@ import (
 
 // Manager limits
 const (
-	DefaultMaxTunnels      = 1000             // Maximum total tunnels
-	DefaultMaxTunnelsPerIP = 10               // Maximum tunnels per IP
-	DefaultRateLimit       = 10               // Registrations per IP per minute
-	DefaultRateLimitWindow = 1 * time.Minute  // Rate limit window
+	DefaultMaxTunnels      = 1000            // Maximum total tunnels
+	DefaultMaxTunnelsPerIP = 10              // Maximum tunnels per IP
+	DefaultRateLimit       = 10              // Registrations per IP per minute
+	DefaultRateLimitWindow = 1 * time.Minute // Rate limit window
+
+	// numShards is the number of shards for lock distribution
+	// Using 32 shards reduces lock contention by ~32x under high concurrency
+	numShards = 32
 )
 
 var (
@@ -30,12 +36,17 @@ type rateLimitEntry struct {
 	windowEnd time.Time
 }
 
-// Manager manages all active tunnel connections
-type Manager struct {
-	tunnels map[string]*Connection // subdomain -> connection
+// shard holds a subset of tunnels with its own lock
+type shard struct {
+	tunnels map[string]*Connection
+	used    map[string]bool
 	mu      sync.RWMutex
-	used    map[string]bool // track used subdomains
-	logger  *zap.Logger
+}
+
+// Manager manages all active tunnel connections with sharded locking
+type Manager struct {
+	shards [numShards]shard
+	logger *zap.Logger
 
 	// Limits
 	maxTunnels      int
@@ -43,7 +54,11 @@ type Manager struct {
 	rateLimit       int
 	rateLimitWindow time.Duration
 
-	// Per-IP tracking
+	// Global counters (atomic for lock-free reads)
+	tunnelCount atomic.Int64
+
+	// Per-IP tracking (requires separate lock as it spans shards)
+	ipMu        sync.RWMutex
 	tunnelsByIP map[string]int             // IP -> tunnel count
 	rateLimits  map[string]*rateLimitEntry // IP -> rate limit entry
 
@@ -94,11 +109,10 @@ func NewManagerWithConfig(logger *zap.Logger, cfg ManagerConfig) *Manager {
 		zap.Int("max_per_ip", cfg.MaxTunnelsPerIP),
 		zap.Int("rate_limit", cfg.RateLimit),
 		zap.Duration("rate_window", cfg.RateLimitWindow),
+		zap.Int("num_shards", numShards),
 	)
 
-	return &Manager{
-		tunnels:         make(map[string]*Connection),
-		used:            make(map[string]bool),
+	m := &Manager{
 		logger:          logger,
 		maxTunnels:      cfg.MaxTunnels,
 		maxTunnelsPerIP: cfg.MaxTunnelsPerIP,
@@ -108,10 +122,25 @@ func NewManagerWithConfig(logger *zap.Logger, cfg ManagerConfig) *Manager {
 		rateLimits:      make(map[string]*rateLimitEntry),
 		stopCh:          make(chan struct{}),
 	}
+
+	// Initialize all shards
+	for i := 0; i < numShards; i++ {
+		m.shards[i].tunnels = make(map[string]*Connection)
+		m.shards[i].used = make(map[string]bool)
+	}
+
+	return m
 }
 
-// checkRateLimit checks if the IP has exceeded rate limit
-func (m *Manager) checkRateLimit(ip string) bool {
+// getShard returns the shard for a given subdomain using FNV-1a hash
+func (m *Manager) getShard(subdomain string) *shard {
+	h := fnv.New32a()
+	h.Write([]byte(subdomain))
+	return &m.shards[h.Sum32()%numShards]
+}
+
+// checkRateLimit checks if the IP has exceeded rate limit (caller must hold ipMu)
+func (m *Manager) checkRateLimitLocked(ip string) bool {
 	now := time.Now()
 	entry, exists := m.rateLimits[ip]
 
@@ -139,22 +168,20 @@ func (m *Manager) Register(conn *websocket.Conn, customSubdomain string) (string
 
 // RegisterWithIP registers a new tunnel with IP tracking
 func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, remoteIP string) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check total tunnel limit
-	if len(m.tunnels) >= m.maxTunnels {
+	// Check global limits first (lock-free read)
+	if m.tunnelCount.Load() >= int64(m.maxTunnels) {
 		m.logger.Warn("Maximum tunnel limit reached",
-			zap.Int("current", len(m.tunnels)),
+			zap.Int64("current", m.tunnelCount.Load()),
 			zap.Int("max", m.maxTunnels),
 		)
 		return "", ErrTooManyTunnels
 	}
 
-	// Check per-IP limits if IP is provided
+	// Check per-IP limits
 	if remoteIP != "" {
-		// Check rate limit
-		if !m.checkRateLimit(remoteIP) {
+		m.ipMu.Lock()
+		if !m.checkRateLimitLocked(remoteIP) {
+			m.ipMu.Unlock()
 			m.logger.Warn("Rate limit exceeded",
 				zap.String("ip", remoteIP),
 				zap.Int("limit", m.rateLimit),
@@ -162,8 +189,8 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 			return "", ErrRateLimitExceeded
 		}
 
-		// Check per-IP tunnel limit
 		if m.tunnelsByIP[remoteIP] >= m.maxTunnelsPerIP {
+			m.ipMu.Unlock()
 			m.logger.Warn("Per-IP tunnel limit reached",
 				zap.String("ip", remoteIP),
 				zap.Int("current", m.tunnelsByIP[remoteIP]),
@@ -171,6 +198,7 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 			)
 			return "", ErrTooManyPerIP
 		}
+		m.ipMu.Unlock()
 	}
 
 	var subdomain string
@@ -183,33 +211,56 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 		if utils.IsReserved(customSubdomain) {
 			return "", ErrReservedSubdomain
 		}
-		if m.used[customSubdomain] {
+
+		// Check if subdomain is taken in its shard
+		s := m.getShard(customSubdomain)
+		s.mu.Lock()
+		if s.used[customSubdomain] {
+			s.mu.Unlock()
 			return "", ErrSubdomainTaken
 		}
 		subdomain = customSubdomain
+
+		// Register in shard
+		tc := NewConnection(subdomain, conn, m.logger)
+		tc.remoteIP = remoteIP
+		s.tunnels[subdomain] = tc
+		s.used[subdomain] = true
+		s.mu.Unlock()
 	} else {
 		// Generate unique random subdomain
 		subdomain = m.generateUniqueSubdomain()
+
+		s := m.getShard(subdomain)
+		s.mu.Lock()
+		tc := NewConnection(subdomain, conn, m.logger)
+		tc.remoteIP = remoteIP
+		s.tunnels[subdomain] = tc
+		s.used[subdomain] = true
+		s.mu.Unlock()
 	}
 
-	// Create connection
-	tc := NewConnection(subdomain, conn, m.logger)
-	tc.remoteIP = remoteIP // Track IP for cleanup
-	m.tunnels[subdomain] = tc
-	m.used[subdomain] = true
-
-	// Update per-IP counter
+	// Update counters
+	m.tunnelCount.Add(1)
 	if remoteIP != "" {
+		m.ipMu.Lock()
 		m.tunnelsByIP[remoteIP]++
+		m.ipMu.Unlock()
 	}
 
-	// Start write pump in background
-	go tc.StartWritePump()
+	// Get connection and start write pump
+	s := m.getShard(subdomain)
+	s.mu.RLock()
+	tc := s.tunnels[subdomain]
+	s.mu.RUnlock()
+	if tc != nil {
+		go tc.StartWritePump()
+	}
 
 	m.logger.Info("Tunnel registered",
 		zap.String("subdomain", subdomain),
 		zap.String("ip", remoteIP),
-		zap.Int("total_tunnels", len(m.tunnels)),
+		zap.Int64("total_tunnels", m.tunnelCount.Load()),
 	)
 
 	return subdomain, nil
@@ -217,101 +268,129 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 
 // Unregister removes a tunnel connection
 func (m *Manager) Unregister(subdomain string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	s := m.getShard(subdomain)
+	s.mu.Lock()
 
-	if tc, ok := m.tunnels[subdomain]; ok {
-		// Decrement per-IP counter
-		if tc.remoteIP != "" && m.tunnelsByIP[tc.remoteIP] > 0 {
-			m.tunnelsByIP[tc.remoteIP]--
-			if m.tunnelsByIP[tc.remoteIP] == 0 {
-				delete(m.tunnelsByIP, tc.remoteIP)
+	tc, ok := s.tunnels[subdomain]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+
+	remoteIP := tc.remoteIP
+	tc.Close()
+	delete(s.tunnels, subdomain)
+	delete(s.used, subdomain)
+	s.mu.Unlock()
+
+	// Update counters
+	m.tunnelCount.Add(-1)
+	if remoteIP != "" {
+		m.ipMu.Lock()
+		if m.tunnelsByIP[remoteIP] > 0 {
+			m.tunnelsByIP[remoteIP]--
+			if m.tunnelsByIP[remoteIP] == 0 {
+				delete(m.tunnelsByIP, remoteIP)
 			}
 		}
-
-		tc.Close()
-		delete(m.tunnels, subdomain)
-		delete(m.used, subdomain)
-
-		m.logger.Info("Tunnel unregistered",
-			zap.String("subdomain", subdomain),
-			zap.Int("total_tunnels", len(m.tunnels)),
-		)
+		m.ipMu.Unlock()
 	}
+
+	m.logger.Info("Tunnel unregistered",
+		zap.String("subdomain", subdomain),
+		zap.Int64("total_tunnels", m.tunnelCount.Load()),
+	)
 }
 
 // Get retrieves a tunnel connection by subdomain
 func (m *Manager) Get(subdomain string) (*Connection, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	tc, ok := m.tunnels[subdomain]
+	s := m.getShard(subdomain)
+	s.mu.RLock()
+	tc, ok := s.tunnels[subdomain]
+	s.mu.RUnlock()
 	return tc, ok
 }
 
 // List returns all active tunnel connections
 func (m *Manager) List() []*Connection {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	// Pre-allocate with approximate capacity
+	connections := make([]*Connection, 0, m.tunnelCount.Load())
 
-	connections := make([]*Connection, 0, len(m.tunnels))
-	for _, tc := range m.tunnels {
-		connections = append(connections, tc)
+	for i := 0; i < numShards; i++ {
+		s := &m.shards[i]
+		s.mu.RLock()
+		for _, tc := range s.tunnels {
+			connections = append(connections, tc)
+		}
+		s.mu.RUnlock()
 	}
+
 	return connections
 }
 
 // Count returns the number of active tunnels
 func (m *Manager) Count() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.tunnels)
+	return int(m.tunnelCount.Load())
 }
 
 // CleanupStale removes stale connections that haven't been active
 func (m *Manager) CleanupStale(timeout time.Duration) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	totalCleaned := 0
 
-	staleSubdomains := []string{}
+	// Clean up each shard independently
+	for i := 0; i < numShards; i++ {
+		s := &m.shards[i]
+		s.mu.Lock()
 
-	for subdomain, tc := range m.tunnels {
-		if !tc.IsAlive(timeout) {
-			staleSubdomains = append(staleSubdomains, subdomain)
+		var staleSubdomains []string
+		for subdomain, tc := range s.tunnels {
+			if !tc.IsAlive(timeout) {
+				staleSubdomains = append(staleSubdomains, subdomain)
+			}
 		}
-	}
 
-	for _, subdomain := range staleSubdomains {
-		if tc, ok := m.tunnels[subdomain]; ok {
-			// Decrement per-IP counter
-			if tc.remoteIP != "" && m.tunnelsByIP[tc.remoteIP] > 0 {
-				m.tunnelsByIP[tc.remoteIP]--
-				if m.tunnelsByIP[tc.remoteIP] == 0 {
-					delete(m.tunnelsByIP, tc.remoteIP)
+		for _, subdomain := range staleSubdomains {
+			if tc, ok := s.tunnels[subdomain]; ok {
+				remoteIP := tc.remoteIP
+				tc.Close()
+				delete(s.tunnels, subdomain)
+				delete(s.used, subdomain)
+
+				// Update counters
+				m.tunnelCount.Add(-1)
+				if remoteIP != "" {
+					m.ipMu.Lock()
+					if m.tunnelsByIP[remoteIP] > 0 {
+						m.tunnelsByIP[remoteIP]--
+						if m.tunnelsByIP[remoteIP] == 0 {
+							delete(m.tunnelsByIP, remoteIP)
+						}
+					}
+					m.ipMu.Unlock()
 				}
 			}
-
-			tc.Close()
-			delete(m.tunnels, subdomain)
-			delete(m.used, subdomain)
 		}
+		totalCleaned += len(staleSubdomains)
+		s.mu.Unlock()
 	}
 
 	// Cleanup expired rate limit entries
+	m.ipMu.Lock()
 	now := time.Now()
 	for ip, entry := range m.rateLimits {
 		if now.After(entry.windowEnd) {
 			delete(m.rateLimits, ip)
 		}
 	}
+	m.ipMu.Unlock()
 
-	if len(staleSubdomains) > 0 {
+	if totalCleaned > 0 {
 		m.logger.Info("Cleaned up stale tunnels",
-			zap.Int("count", len(staleSubdomains)),
+			zap.Int("count", totalCleaned),
 		)
 	}
 
-	return len(staleSubdomains)
+	return totalCleaned
 }
 
 // StartCleanupTask starts a background task to clean up stale connections
@@ -336,7 +415,16 @@ func (m *Manager) generateUniqueSubdomain() string {
 
 	for i := 0; i < maxAttempts; i++ {
 		subdomain := utils.GenerateSubdomain(6)
-		if !m.used[subdomain] && !utils.IsReserved(subdomain) {
+		if utils.IsReserved(subdomain) {
+			continue
+		}
+
+		s := m.getShard(subdomain)
+		s.mu.RLock()
+		taken := s.used[subdomain]
+		s.mu.RUnlock()
+
+		if !taken {
 			return subdomain
 		}
 	}
@@ -350,17 +438,21 @@ func (m *Manager) Shutdown() {
 	// Signal cleanup goroutine to stop
 	close(m.stopCh)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.logger.Info("Shutting down tunnel manager",
-		zap.Int("active_tunnels", len(m.tunnels)),
+		zap.Int64("active_tunnels", m.tunnelCount.Load()),
 	)
 
-	for _, tc := range m.tunnels {
-		tc.Close()
+	// Close all tunnels in each shard
+	for i := 0; i < numShards; i++ {
+		s := &m.shards[i]
+		s.mu.Lock()
+		for _, tc := range s.tunnels {
+			tc.Close()
+		}
+		s.tunnels = make(map[string]*Connection)
+		s.used = make(map[string]bool)
+		s.mu.Unlock()
 	}
 
-	m.tunnels = make(map[string]*Connection)
-	m.used = make(map[string]bool)
+	m.tunnelCount.Store(0)
 }

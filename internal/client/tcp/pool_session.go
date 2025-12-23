@@ -2,7 +2,6 @@ package tcp
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -11,9 +10,11 @@ import (
 	json "github.com/goccy/go-json"
 	"github.com/hashicorp/yamux"
 
-	"drip/internal/shared/constants"
+	"drip/internal/shared/mux"
 	"drip/internal/shared/protocol"
 )
+
+var dataConnCounter atomic.Uint64
 
 // sessionHandle wraps a yamux session with metadata.
 type sessionHandle struct {
@@ -35,6 +36,36 @@ func (h *sessionHandle) lastActiveTime() time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, n)
+}
+
+// warmupSessions pre-creates initial sessions in parallel to eliminate cold-start latency.
+func (c *PoolClient) warmupSessions() {
+	if c.IsClosed() || c.tunnelID == "" {
+		return
+	}
+
+	c.mu.RLock()
+	desired := c.desiredTotal
+	c.mu.RUnlock()
+
+	current := c.sessionCount()
+	toCreate := desired - current
+	if toCreate <= 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < toCreate; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = c.addDataSession()
+		}()
+	}
+	wg.Wait()
+
+	// Brief wait for server to register all sessions
+	time.Sleep(100 * time.Millisecond)
 }
 
 // scalerLoop monitors load and adjusts session count.
@@ -162,7 +193,7 @@ func (c *PoolClient) addDataSession() error {
 		return err
 	}
 
-	connID := fmt.Sprintf("data-%d", time.Now().UnixNano())
+	connID := fmt.Sprintf("data-%d", dataConnCounter.Add(1))
 
 	req := protocol.DataConnectRequest{
 		TunnelID:     c.tunnelID,
@@ -214,10 +245,7 @@ func (c *PoolClient) addDataSession() error {
 		return fmt.Errorf("data connection rejected: %s", resp.Message)
 	}
 
-	yamuxCfg := yamux.DefaultConfig()
-	yamuxCfg.EnableKeepAlive = false
-	yamuxCfg.LogOutput = io.Discard
-	yamuxCfg.AcceptBacklog = constants.YamuxAcceptBacklog
+	yamuxCfg := mux.NewClientConfig()
 
 	session, err := yamux.Server(conn, yamuxCfg)
 	if err != nil {
