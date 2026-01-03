@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"drip/internal/server/metrics"
 	"drip/internal/shared/utils"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -176,6 +177,7 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 				zap.Int64("current", current),
 				zap.Int("max", m.maxTunnels),
 			)
+			metrics.TunnelRegistrationFailures.WithLabelValues("max_tunnels").Inc()
 			return "", ErrTooManyTunnels
 		}
 		if m.tunnelCount.CompareAndSwap(current, current+1) {
@@ -199,6 +201,8 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 				zap.String("ip", remoteIP),
 				zap.Int("limit", m.rateLimit),
 			)
+			metrics.RateLimitRejections.WithLabelValues("registration", remoteIP).Inc()
+			metrics.TunnelRegistrationFailures.WithLabelValues("rate_limit").Inc()
 			return "", ErrRateLimitExceeded
 		}
 
@@ -211,11 +215,13 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 				zap.Int("current", currentPerIP),
 				zap.Int("max", m.maxTunnelsPerIP),
 			)
+			metrics.TunnelRegistrationFailures.WithLabelValues("max_per_ip").Inc()
 			return "", ErrTooManyPerIP
 		}
 
 		// Reserve per-IP slot while still holding the lock
 		m.tunnelsByIP[remoteIP]++
+		metrics.TunnelsByIP.WithLabelValues(remoteIP).Set(float64(m.tunnelsByIP[remoteIP]))
 		m.ipMu.Unlock()
 	}
 
@@ -293,6 +299,10 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 		zap.Int64("total_tunnels", m.tunnelCount.Load()),
 	)
 
+	// Update Prometheus metrics
+	metrics.TunnelRegistrations.Inc()
+	metrics.TunnelCount.Set(float64(m.tunnelCount.Load()))
+
 	return subdomain, nil
 }
 
@@ -321,6 +331,9 @@ func (m *Manager) Unregister(subdomain string) {
 			m.tunnelsByIP[remoteIP]--
 			if m.tunnelsByIP[remoteIP] == 0 {
 				delete(m.tunnelsByIP, remoteIP)
+				metrics.TunnelsByIP.DeleteLabelValues(remoteIP)
+			} else {
+				metrics.TunnelsByIP.WithLabelValues(remoteIP).Set(float64(m.tunnelsByIP[remoteIP]))
 			}
 		}
 		m.ipMu.Unlock()
@@ -330,6 +343,9 @@ func (m *Manager) Unregister(subdomain string) {
 		zap.String("subdomain", subdomain),
 		zap.Int64("total_tunnels", m.tunnelCount.Load()),
 	)
+
+	// Update Prometheus metrics
+	metrics.TunnelCount.Set(float64(m.tunnelCount.Load()))
 }
 
 // Get retrieves a tunnel connection by subdomain

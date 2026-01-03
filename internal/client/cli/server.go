@@ -21,16 +21,17 @@ import (
 )
 
 var (
-	serverPort       int
-	serverPublicPort int
-	serverDomain     string
-	serverAuthToken  string
-	serverDebug      bool
-	serverTCPPortMin int
-	serverTCPPortMax int
-	serverTLSCert    string
-	serverTLSKey     string
-	serverPprofPort  int
+	serverPort        int
+	serverPublicPort  int
+	serverDomain      string
+	serverAuthToken   string
+	serverMetricsToken string
+	serverDebug       bool
+	serverTCPPortMin  int
+	serverTCPPortMax  int
+	serverTLSCert     string
+	serverTLSKey      string
+	serverPprofPort   int
 )
 
 var serverCmd = &cobra.Command{
@@ -48,6 +49,7 @@ func init() {
 	serverCmd.Flags().IntVar(&serverPublicPort, "public-port", getEnvInt("DRIP_PUBLIC_PORT", 0), "Public port to display in URLs (env: DRIP_PUBLIC_PORT)")
 	serverCmd.Flags().StringVarP(&serverDomain, "domain", "d", getEnvString("DRIP_DOMAIN", constants.DefaultDomain), "Server domain (env: DRIP_DOMAIN)")
 	serverCmd.Flags().StringVarP(&serverAuthToken, "token", "t", getEnvString("DRIP_TOKEN", ""), "Authentication token (env: DRIP_TOKEN)")
+	serverCmd.Flags().StringVar(&serverMetricsToken, "metrics-token", getEnvString("DRIP_METRICS_TOKEN", ""), "Metrics and stats token (env: DRIP_METRICS_TOKEN)")
 	serverCmd.Flags().BoolVar(&serverDebug, "debug", false, "Enable debug logging")
 	serverCmd.Flags().IntVar(&serverTCPPortMin, "tcp-port-min", getEnvInt("DRIP_TCP_PORT_MIN", constants.DefaultTCPPortMin), "Minimum TCP tunnel port (env: DRIP_TCP_PORT_MIN)")
 	serverCmd.Flags().IntVar(&serverTCPPortMax, "tcp-port-max", getEnvInt("DRIP_TCP_PORT_MAX", constants.DefaultTCPPortMax), "Maximum TCP tunnel port (env: DRIP_TCP_PORT_MAX)")
@@ -130,7 +132,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", serverPort)
 
-	httpHandler := proxy.NewHandler(tunnelManager, logger, serverDomain, serverAuthToken)
+	httpHandler := proxy.NewHandler(tunnelManager, logger, serverDomain, serverAuthToken, serverMetricsToken)
 
 	listener := tcp.NewListener(listenAddr, tlsConfig, serverAuthToken, tunnelManager, logger, portAllocator, serverDomain, displayPort, httpHandler)
 

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"drip/internal/server/metrics"
 	"drip/internal/shared/protocol"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
@@ -144,6 +145,8 @@ func (c *Connection) AddBytesIn(n int64) {
 		return
 	}
 	c.bytesIn.Add(n)
+	metrics.BytesReceived.Add(float64(n))
+	metrics.TunnelBytesReceived.WithLabelValues(c.Subdomain, c.Subdomain, c.GetTunnelType().String()).Add(float64(n))
 }
 
 func (c *Connection) AddBytesOut(n int64) {
@@ -151,6 +154,8 @@ func (c *Connection) AddBytesOut(n int64) {
 		return
 	}
 	c.bytesOut.Add(n)
+	metrics.BytesSent.Add(float64(n))
+	metrics.TunnelBytesSent.WithLabelValues(c.Subdomain, c.Subdomain, c.GetTunnelType().String()).Add(float64(n))
 }
 
 func (c *Connection) GetBytesIn() int64 {
@@ -163,12 +168,14 @@ func (c *Connection) GetBytesOut() int64 {
 
 func (c *Connection) IncActiveConnections() {
 	c.activeConnections.Add(1)
+	metrics.TunnelActiveConnections.WithLabelValues(c.Subdomain, c.Subdomain, c.GetTunnelType().String()).Inc()
 }
 
 func (c *Connection) DecActiveConnections() {
 	if v := c.activeConnections.Add(-1); v < 0 {
 		c.activeConnections.Store(0)
 	}
+	metrics.TunnelActiveConnections.WithLabelValues(c.Subdomain, c.Subdomain, c.GetTunnelType().String()).Dec()
 }
 
 func (c *Connection) GetActiveConnections() int64 {

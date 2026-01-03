@@ -59,8 +59,9 @@ MSG_EN=(
     ["enter_domain"]="Enter your domain (e.g., tunnel.example.com)"
     ["domain_required"]="Domain is required"
     ["enter_port"]="Enter server port"
-    ["enter_token"]="Enter authentication token (leave empty to generate)"
-    ["token_generated"]="Token generated"
+    ["enter_token"]="Enter authentication token (leave empty to auto-generate)"
+    ["token_generated"]="Authentication token generated"
+    ["metrics_token_generated"]="Metrics token generated"
     ["enter_cert_path"]="Enter TLS certificate path (public key)"
     ["enter_key_path"]="Enter TLS private key path"
     ["cert_not_found"]="Certificate file not found"
@@ -94,7 +95,8 @@ MSG_EN=(
     ["install_complete"]="Installation completed!"
     ["client_info"]="Client connection info"
     ["server_addr"]="Server"
-    ["token_label"]="Token"
+    ["token_label"]="Auth Token"
+    ["metrics_token_label"]="Metrics Token"
     ["service_commands"]="Service management commands"
     ["cmd_start"]="Start service"
     ["cmd_stop"]="Stop service"
@@ -149,7 +151,8 @@ MSG_ZH=(
     ["domain_required"]="域名是必填项"
     ["enter_port"]="输入服务器端口"
     ["enter_token"]="输入认证令牌（留空自动生成）"
-    ["token_generated"]="令牌已生成"
+    ["token_generated"]="认证令牌已生成"
+    ["metrics_token_generated"]="监控令牌已生成"
     ["enter_cert_path"]="输入 TLS 证书路径（公钥）"
     ["enter_key_path"]="输入 TLS 私钥路径"
     ["cert_not_found"]="证书文件未找到"
@@ -183,7 +186,8 @@ MSG_ZH=(
     ["install_complete"]="安装完成！"
     ["client_info"]="客户端连接信息"
     ["server_addr"]="服务器"
-    ["token_label"]="令牌"
+    ["token_label"]="认证令牌"
+    ["metrics_token_label"]="监控令牌"
     ["service_commands"]="服务管理命令"
     ["cmd_start"]="启动服务"
     ["cmd_stop"]="停止服务"
@@ -546,7 +550,7 @@ install_binary() {
 # Configuration
 # ============================================================================
 generate_token() {
-    # Generate a random 32-character token
+    # Generate a random 32-character token (16 bytes = 32 hex chars)
     if command -v openssl &> /dev/null; then
         openssl rand -hex 16
     else
@@ -583,13 +587,17 @@ configure_server() {
     read -p "$(msg enter_tcp_max) [$DEFAULT_TCP_PORT_MAX]: " TCP_PORT_MAX < /dev/tty
     TCP_PORT_MAX="${TCP_PORT_MAX:-$DEFAULT_TCP_PORT_MAX}"
 
-    # Token
+    # Authentication token (user can provide or auto-generate)
     echo ""
     read -p "$(msg enter_token): " TOKEN < /dev/tty
     if [[ -z "$TOKEN" ]]; then
         TOKEN=$(generate_token)
         print_success "$(msg token_generated): $TOKEN"
     fi
+
+    # Metrics token (always auto-generated)
+    METRICS_TOKEN=$(generate_token)
+    print_success "$(msg metrics_token_generated): $METRICS_TOKEN"
 
     # TLS certificate selection
     print_panel "$(msg cert_option_title)" \
@@ -946,6 +954,7 @@ DRIP_PORT=${PORT}
 DRIP_PUBLIC_PORT=${PUBLIC_PORT}
 DRIP_DOMAIN=${DOMAIN}
 DRIP_TOKEN=${TOKEN}
+DRIP_METRICS_TOKEN=${METRICS_TOKEN}
 
 # TLS certificate paths
 DRIP_TLS_CERT=${CERT_PATH}
@@ -995,8 +1004,9 @@ show_completion() {
     print_panel "$(msg install_complete)"
 
     echo -e "${CYAN}$(msg client_info):${NC}"
-    echo -e "  ${BOLD}$(msg server_addr):${NC} ${DOMAIN}:${PORT}"
-    echo -e "  ${BOLD}$(msg token_label):${NC}  ${TOKEN}"
+    echo -e "  ${BOLD}$(msg server_addr):${NC}        ${DOMAIN}:${PORT}"
+    echo -e "  ${BOLD}$(msg token_label):${NC}      ${TOKEN}"
+    echo -e "  ${BOLD}$(msg metrics_token_label):${NC} ${METRICS_TOKEN}"
     echo ""
 
     echo -e "${CYAN}$(msg service_commands):${NC}"

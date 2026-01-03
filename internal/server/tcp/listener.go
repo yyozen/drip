@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"drip/internal/server/metrics"
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/pool"
 	"drip/internal/shared/recovery"
@@ -55,6 +56,9 @@ func NewListener(address string, tlsConfig *tls.Config, authToken string, manage
 
 	panicMetrics := recovery.NewPanicMetrics(logger, nil)
 	recoverer := recovery.NewRecoverer(logger, panicMetrics)
+
+	// Initialize worker pool metrics
+	metrics.WorkerPoolSize.Set(float64(workers))
 
 	return &Listener{
 		address:      address,
@@ -237,10 +241,16 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 	l.connections[connID] = conn
 	l.connMu.Unlock()
 
+	// Update connection metrics
+	metrics.TotalConnections.Inc()
+	metrics.ActiveConnections.Inc()
+
 	defer func() {
 		l.connMu.Lock()
 		delete(l.connections, connID)
 		l.connMu.Unlock()
+
+		metrics.ActiveConnections.Dec()
 
 		if !conn.IsHandedOff() {
 			netConn.Close()

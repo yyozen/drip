@@ -20,6 +20,7 @@ import (
 	"drip/internal/shared/pool"
 	"drip/internal/shared/protocol"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -33,18 +34,20 @@ var bufioReaderPool = sync.Pool{
 const openStreamTimeout = 3 * time.Second
 
 type Handler struct {
-	manager   *tunnel.Manager
-	logger    *zap.Logger
-	domain    string
-	authToken string
+	manager      *tunnel.Manager
+	logger       *zap.Logger
+	domain       string
+	authToken    string
+	metricsToken string
 }
 
-func NewHandler(manager *tunnel.Manager, logger *zap.Logger, domain string, authToken string) *Handler {
+func NewHandler(manager *tunnel.Manager, logger *zap.Logger, domain string, authToken string, metricsToken string) *Handler {
 	return &Handler{
-		manager:   manager,
-		logger:    logger,
-		domain:    domain,
-		authToken: authToken,
+		manager:      manager,
+		logger:       logger,
+		domain:       domain,
+		authToken:    authToken,
+		metricsToken: metricsToken,
 	}
 }
 
@@ -55,6 +58,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/stats" {
 		h.serveStats(w, r)
+		return
+	}
+	if r.URL.Path == "/metrics" {
+		h.serveMetrics(w, r)
 		return
 	}
 
@@ -346,7 +353,7 @@ func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
 	<code>drip http 3000</code><br><br>
 	<code>drip https 443</code><br><br>
 	<code>drip tcp 5432</code>
-    <p><a href="/health">Health Check</a> | <a href="/stats">Statistics</a></p>
+    <p><a href="/health">Health Check</a> | <a href="/stats">Statistics</a> | <a href="/metrics">Prometheus Metrics</a></p>
 </body>
 </html>`
 
@@ -375,7 +382,7 @@ func (h *Handler) serveHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveStats(w http.ResponseWriter, r *http.Request) {
-	if h.authToken != "" {
+	if h.metricsToken != "" {
 		// Only accept token via Authorization header (Bearer token)
 		// URL query parameters are insecure (logged, cached, visible in browser history)
 		var token string
@@ -384,9 +391,9 @@ func (h *Handler) serveStats(w http.ResponseWriter, r *http.Request) {
 			token = strings.TrimPrefix(authHeader, "Bearer ")
 		}
 
-		if token != h.authToken {
+		if token != h.metricsToken {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="stats"`)
-			http.Error(w, "Unauthorized: provide token via 'Authorization: Bearer <token>' header", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: provide metrics token via 'Authorization: Bearer <token>' header", http.StatusUnauthorized)
 			return
 		}
 	}
@@ -424,6 +431,26 @@ func (h *Handler) serveStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Write(data)
+}
+
+func (h *Handler) serveMetrics(w http.ResponseWriter, r *http.Request) {
+	if h.metricsToken != "" {
+		// Only accept token via Authorization header (Bearer token)
+		var token string
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+
+		if token != h.metricsToken {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "Unauthorized: provide metrics token via 'Authorization: Bearer <token>' header", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Serve Prometheus metrics
+	promhttp.Handler().ServeHTTP(w, r)
 }
 
 type bufferedReadWriteCloser struct {

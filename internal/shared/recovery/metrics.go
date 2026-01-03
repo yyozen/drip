@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"drip/internal/server/metrics"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +40,7 @@ func NewPanicMetrics(logger *zap.Logger, alerter Alerter) *PanicMetrics {
 
 func (pm *PanicMetrics) RecordPanic(location string, panicValue interface{}) {
 	atomic.AddUint64(&pm.totalPanics, 1)
+	metrics.PanicTotal.Inc()
 
 	pm.mu.Lock()
 
