@@ -79,20 +79,6 @@ func (p *BufferPool) Put(buf *[]byte) {
 	// Note: buffers with non-standard sizes are not pooled (let GC handle them)
 }
 
-// GetXLarge returns a 1MB buffer for bulk data transfers
-func (p *BufferPool) GetXLarge() *[]byte {
-	return p.xlarge.Get().(*[]byte)
-}
-
-// PutXLarge returns a 1MB buffer to the pool
-func (p *BufferPool) PutXLarge(buf *[]byte) {
-	if buf == nil || cap(*buf) != SizeXLarge {
-		return
-	}
-	*buf = (*buf)[:cap(*buf)]
-	p.xlarge.Put(buf)
-}
-
 var globalBufferPool = NewBufferPool()
 
 func GetBuffer(size int) *[]byte {
@@ -101,14 +87,4 @@ func GetBuffer(size int) *[]byte {
 
 func PutBuffer(buf *[]byte) {
 	globalBufferPool.Put(buf)
-}
-
-// GetXLargeBuffer returns a 1MB buffer from the global pool
-func GetXLargeBuffer() *[]byte {
-	return globalBufferPool.GetXLarge()
-}
-
-// PutXLargeBuffer returns a 1MB buffer to the global pool
-func PutXLargeBuffer(buf *[]byte) {
-	globalBufferPool.PutXLarge(buf)
 }

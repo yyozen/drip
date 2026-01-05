@@ -372,51 +372,6 @@ func (g *ConnectionGroup) buildSessionHeap(includePrimary bool) *sessionHeap {
 	return h
 }
 
-func (g *ConnectionGroup) selectSession() *yamux.Session {
-	h := g.buildSessionHeap(false)
-	if h.Len() == 0 {
-		sessionHeapPool.Put(h)
-		h = g.buildSessionHeap(true)
-	}
-	if h.Len() == 0 {
-		sessionHeapPool.Put(h)
-		return nil
-	}
-
-	entry := heap.Pop(h).(*sessionEntry)
-	session := entry.session
-
-	*h = (*h)[:0]
-	sessionHeapPool.Put(h)
-
-	if session == nil || session.IsClosed() {
-		return nil
-	}
-	return session
-}
-
-func (g *ConnectionGroup) sessionsSnapshot(includePrimary bool) []*yamux.Session {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	if len(g.Sessions) == 0 {
-		return nil
-	}
-
-	sessions := make([]*yamux.Session, 0, len(g.Sessions))
-	for id, session := range g.Sessions {
-		if session == nil || session.IsClosed() {
-			continue
-		}
-		if id == "primary" && !includePrimary {
-			continue
-		}
-		sessions = append(sessions, session)
-	}
-
-	return sessions
-}
-
 func (g *ConnectionGroup) deleteClosedSessions() {
 	g.mu.Lock()
 	for id, session := range g.Sessions {
