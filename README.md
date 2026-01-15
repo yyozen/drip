@@ -57,7 +57,7 @@ drip http 3000 -n myapp
 
 ## Documentation
 
-For complete documentation, visit **[driptunnel.app/en/docs](https://driptunnel.app/en/docs)**
+For complete documentation, visit **[Docs](https://driptunnel.app/en/docs)**
 
 - [Installation Guide](https://driptunnel.app/en/docs/installation)
 - [Client Usage](https://driptunnel.app/en/docs/client)

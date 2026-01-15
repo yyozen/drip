@@ -57,7 +57,7 @@ drip http 3000 -n myapp
 
 ## 文档
 
-完整文档请访问 **[driptunnel.app/docs](https://driptunnel.app/docs)**
+完整文档请访问 **[Docs](https://driptunnel.app/zh/docs)**
 
 - [安装指南](https://driptunnel.app/docs/installation)
 - [客户端使用](https://driptunnel.app/docs/client)
