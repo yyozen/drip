@@ -27,9 +27,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/drip-server
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
             type=raw,value=latest
 
       - name: Build and push Docker image
