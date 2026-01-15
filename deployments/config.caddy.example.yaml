@@ -1,0 +1,40 @@
+# Drip Server Configuration (Caddy reverse proxy mode)
+# Use with: docker-compose.caddy.yml
+#
+# Architecture:
+#   Client --[HTTPS/WSS]--> Caddy:443 --[HTTP/WS]--> drip-server:8443
+#   Client --[TCP tunnel]--> drip-server:20000-20100 (direct, no proxy)
+
+# Server port - Caddy will proxy to this port (internal only)
+port: 8443
+
+# Domain for client connections (required)
+domain: tunnel.example.com
+
+# Domain for tunnel URLs (optional, defaults to domain)
+# tunnel_domain: example.com
+
+# Authentication token (optional, but recommended)
+token: your-secret-token
+
+# TLS disabled - Caddy handles TLS termination
+tls_enabled: false
+
+# Public port for URLs - set to 443 since Caddy serves on 443
+public_port: 443
+
+# TCP tunnel port range (exposed directly to clients, not through Caddy)
+tcp_port_min: 20000
+tcp_port_max: 20100
+
+# Optional settings
+# metrics_token: secret     # Token for /metrics endpoint
+# debug: false              # Enable debug logging
+# pprof_port: 6060          # Enable pprof profiling
+# transports:               # Allowed transports (default: tcp,wss)
+#   - tcp
+#   - wss
+# tunnel_types:             # Allowed tunnel types (default: http,https,tcp)
+#   - http
+#   - https
+#   - tcp

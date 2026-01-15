@@ -98,7 +98,6 @@ func runHTTP(_ *cobra.Command, args []string) error {
 	return runTunnelWithUI(connConfig, daemon)
 }
 
-// parseTransport converts a string to TransportType
 func parseTransport(s string) tcp.TransportType {
 	switch strings.ToLower(s) {
 	case "wss":

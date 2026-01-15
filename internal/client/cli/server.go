@@ -36,6 +36,7 @@ var (
 	serverPprofPort      int
 	serverTransports     string
 	serverTunnelTypes    string
+	serverConfigFile     string
 )
 
 var serverCmd = &cobra.Command{
@@ -47,6 +48,9 @@ var serverCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
+
+	// Config file flag
+	serverCmd.Flags().StringVarP(&serverConfigFile, "config", "c", "", "Path to config file (default: /etc/drip/config.yaml or ~/.drip/server.yaml)")
 
 	// Command line flags with environment variable defaults
 	serverCmd.Flags().IntVarP(&serverPort, "port", "p", getEnvInt("DRIP_PORT", 8443), "Server port (env: DRIP_PORT)")
@@ -71,32 +75,172 @@ func init() {
 	serverCmd.Flags().StringVar(&serverTunnelTypes, "tunnel-types", getEnvString("DRIP_TUNNEL_TYPES", "http,https,tcp"), "Allowed tunnel types: http,https,tcp (env: DRIP_TUNNEL_TYPES)")
 }
 
-func runServer(_ *cobra.Command, _ []string) error {
+func runServer(cmd *cobra.Command, _ []string) error {
 	// Apply server-mode GC tuning (high throughput, more memory)
 	tuning.ApplyMode(tuning.ModeServer)
 
-	if serverTLSCert == "" {
-		return fmt.Errorf("TLS certificate path is required (use --tls-cert flag or DRIP_TLS_CERT environment variable)")
+	// Load config file if specified or if default exists
+	var cfg *config.ServerConfig
+	configPath := serverConfigFile
+	if configPath == "" && config.ServerConfigExists("") {
+		configPath = config.DefaultServerConfigPath()
 	}
-	if serverTLSKey == "" {
-		return fmt.Errorf("TLS private key path is required (use --tls-key flag or DRIP_TLS_KEY environment variable)")
+	if configPath != "" {
+		var err error
+		cfg, err = config.LoadServerConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to load config file: %w", err)
+		}
+	}
+	if cfg == nil {
+		cfg = &config.ServerConfig{}
 	}
 
-	if err := utils.InitServerLogger(serverDebug); err != nil {
+	// Port
+	if cmd.Flags().Changed("port") {
+		cfg.Port = serverPort
+	} else if os.Getenv("DRIP_PORT") != "" {
+		cfg.Port = serverPort
+	} else if cfg.Port == 0 {
+		cfg.Port = serverPort
+	}
+
+	// PublicPort
+	if cmd.Flags().Changed("public-port") {
+		cfg.PublicPort = serverPublicPort
+	} else if os.Getenv("DRIP_PUBLIC_PORT") != "" {
+		cfg.PublicPort = serverPublicPort
+	}
+
+	// Domain
+	if cmd.Flags().Changed("domain") {
+		cfg.Domain = serverDomain
+	} else if os.Getenv("DRIP_DOMAIN") != "" {
+		cfg.Domain = serverDomain
+	} else if cfg.Domain == "" {
+		cfg.Domain = serverDomain
+	}
+
+	// TunnelDomain
+	if cmd.Flags().Changed("tunnel-domain") {
+		cfg.TunnelDomain = serverTunnelDomain
+	} else if os.Getenv("DRIP_TUNNEL_DOMAIN") != "" {
+		cfg.TunnelDomain = serverTunnelDomain
+	}
+
+	// AuthToken
+	if cmd.Flags().Changed("token") {
+		cfg.AuthToken = serverAuthToken
+	} else if os.Getenv("DRIP_TOKEN") != "" {
+		cfg.AuthToken = serverAuthToken
+	}
+
+	// MetricsToken
+	if cmd.Flags().Changed("metrics-token") {
+		cfg.MetricsToken = serverMetricsToken
+	} else if os.Getenv("DRIP_METRICS_TOKEN") != "" {
+		cfg.MetricsToken = serverMetricsToken
+	}
+
+	// Debug
+	if cmd.Flags().Changed("debug") {
+		cfg.Debug = serverDebug
+	}
+
+	// TCPPortMin
+	if cmd.Flags().Changed("tcp-port-min") {
+		cfg.TCPPortMin = serverTCPPortMin
+	} else if os.Getenv("DRIP_TCP_PORT_MIN") != "" {
+		cfg.TCPPortMin = serverTCPPortMin
+	} else if cfg.TCPPortMin == 0 {
+		cfg.TCPPortMin = serverTCPPortMin
+	}
+
+	// TCPPortMax
+	if cmd.Flags().Changed("tcp-port-max") {
+		cfg.TCPPortMax = serverTCPPortMax
+	} else if os.Getenv("DRIP_TCP_PORT_MAX") != "" {
+		cfg.TCPPortMax = serverTCPPortMax
+	} else if cfg.TCPPortMax == 0 {
+		cfg.TCPPortMax = serverTCPPortMax
+	}
+
+	// TLSCertFile
+	if cmd.Flags().Changed("tls-cert") {
+		cfg.TLSCertFile = serverTLSCert
+	} else if os.Getenv("DRIP_TLS_CERT") != "" {
+		cfg.TLSCertFile = serverTLSCert
+	}
+
+	// TLSKeyFile
+	if cmd.Flags().Changed("tls-key") {
+		cfg.TLSKeyFile = serverTLSKey
+	} else if os.Getenv("DRIP_TLS_KEY") != "" {
+		cfg.TLSKeyFile = serverTLSKey
+	}
+
+	// PprofPort
+	if cmd.Flags().Changed("pprof") {
+		cfg.PprofPort = serverPprofPort
+	} else if os.Getenv("DRIP_PPROF_PORT") != "" {
+		cfg.PprofPort = serverPprofPort
+	}
+
+	// AllowedTransports
+	if cmd.Flags().Changed("transports") {
+		cfg.AllowedTransports = parseCommaSeparated(serverTransports)
+	} else if os.Getenv("DRIP_TRANSPORTS") != "" {
+		cfg.AllowedTransports = parseCommaSeparated(serverTransports)
+	} else if len(cfg.AllowedTransports) == 0 {
+		cfg.AllowedTransports = parseCommaSeparated(serverTransports)
+	}
+
+	// AllowedTunnelTypes
+	if cmd.Flags().Changed("tunnel-types") {
+		cfg.AllowedTunnelTypes = parseCommaSeparated(serverTunnelTypes)
+	} else if os.Getenv("DRIP_TUNNEL_TYPES") != "" {
+		cfg.AllowedTunnelTypes = parseCommaSeparated(serverTunnelTypes)
+	} else if len(cfg.AllowedTunnelTypes) == 0 {
+		cfg.AllowedTunnelTypes = parseCommaSeparated(serverTunnelTypes)
+	}
+
+	// TLSEnabled
+	if os.Getenv("DRIP_TLS_ENABLED") != "" {
+		cfg.TLSEnabled = os.Getenv("DRIP_TLS_ENABLED") == "true" || os.Getenv("DRIP_TLS_ENABLED") == "1"
+	} else if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		if !cfg.TLSEnabled {
+			cfg.TLSEnabled = true
+		}
+	}
+
+	if cfg.TLSEnabled {
+		if cfg.TLSCertFile == "" {
+			return fmt.Errorf("TLS certificate path is required when TLS is enabled (use --tls-cert flag, DRIP_TLS_CERT environment variable, or config file)")
+		}
+		if cfg.TLSKeyFile == "" {
+			return fmt.Errorf("TLS private key path is required when TLS is enabled (use --tls-key flag, DRIP_TLS_KEY environment variable, or config file)")
+		}
+	}
+
+	if err := utils.InitServerLogger(cfg.Debug); err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 	defer utils.Sync()
 
 	logger := utils.GetLogger()
 
+	if configPath != "" {
+		logger.Info("Loaded configuration from file", zap.String("path", configPath))
+	}
+
 	logger.Info("Starting Drip Server",
 		zap.String("version", Version),
 		zap.String("commit", GitCommit),
 	)
 
-	if serverPprofPort > 0 {
+	if cfg.PprofPort > 0 {
 		go func() {
-			pprofAddr := fmt.Sprintf("localhost:%d", serverPprofPort)
+			pprofAddr := fmt.Sprintf("localhost:%d", cfg.PprofPort)
 			logger.Info("Starting pprof server", zap.String("address", pprofAddr))
 			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
 				logger.Error("pprof server failed", zap.Error(err))
@@ -104,75 +248,67 @@ func runServer(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	displayPort := serverPublicPort
-	if displayPort == 0 {
-		displayPort = serverPort
+	// Set public port for display if not specified
+	if cfg.PublicPort == 0 {
+		cfg.PublicPort = cfg.Port
 	}
 
-	// Use tunnel domain if set, otherwise fall back to domain
-	tunnelDomain := serverTunnelDomain
-	if tunnelDomain == "" {
-		tunnelDomain = serverDomain
+	// Use tunnel domain if not set, fall back to domain
+	if cfg.TunnelDomain == "" {
+		cfg.TunnelDomain = cfg.Domain
 	}
 
-	serverConfig := &config.ServerConfig{
-		Port:               serverPort,
-		PublicPort:         displayPort,
-		Domain:             serverDomain,
-		TunnelDomain:       tunnelDomain,
-		TCPPortMin:         serverTCPPortMin,
-		TCPPortMax:         serverTCPPortMax,
-		TLSEnabled:         true,
-		TLSCertFile:        serverTLSCert,
-		TLSKeyFile:         serverTLSKey,
-		AuthToken:          serverAuthToken,
-		Debug:              serverDebug,
-		AllowedTransports:  parseCommaSeparated(serverTransports),
-		AllowedTunnelTypes: parseCommaSeparated(serverTunnelTypes),
-	}
-
-	if err := serverConfig.Validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		logger.Fatal("Invalid server configuration", zap.Error(err))
 	}
 
-	tlsConfig, err := serverConfig.LoadTLSConfig()
+	tlsConfig, err := cfg.LoadTLSConfig()
 	if err != nil {
 		logger.Fatal("Failed to load TLS configuration", zap.Error(err))
 	}
 
-	logger.Info("TLS 1.3 configuration loaded",
-		zap.String("cert", serverTLSCert),
-		zap.String("key", serverTLSKey),
-	)
+	if cfg.TLSEnabled {
+		logger.Info("TLS 1.3 configuration loaded",
+			zap.String("cert", cfg.TLSCertFile),
+			zap.String("key", cfg.TLSKeyFile),
+		)
+	} else {
+		logger.Info("TLS disabled - running in plain TCP mode (for reverse proxy)")
+	}
 
 	tunnelManager := tunnel.NewManager(logger)
 
-	portAllocator, err := tcp.NewPortAllocator(serverTCPPortMin, serverTCPPortMax)
+	portAllocator, err := tcp.NewPortAllocator(cfg.TCPPortMin, cfg.TCPPortMax)
 	if err != nil {
 		logger.Fatal("Invalid TCP port range", zap.Error(err))
 	}
 
-	listenAddr := fmt.Sprintf("0.0.0.0:%d", serverPort)
+	listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 
-	httpHandler := proxy.NewHandler(tunnelManager, logger, tunnelDomain, serverAuthToken, serverMetricsToken)
-	httpHandler.SetAllowedTransports(serverConfig.AllowedTransports)
-	httpHandler.SetAllowedTunnelTypes(serverConfig.AllowedTunnelTypes)
+	httpHandler := proxy.NewHandler(tunnelManager, logger, cfg.TunnelDomain, cfg.AuthToken, cfg.MetricsToken)
+	httpHandler.SetAllowedTransports(cfg.AllowedTransports)
+	httpHandler.SetAllowedTunnelTypes(cfg.AllowedTunnelTypes)
 
-	listener := tcp.NewListener(listenAddr, tlsConfig, serverAuthToken, tunnelManager, logger, portAllocator, serverDomain, tunnelDomain, displayPort, httpHandler)
-	listener.SetAllowedTransports(serverConfig.AllowedTransports)
-	listener.SetAllowedTunnelTypes(serverConfig.AllowedTunnelTypes)
+	listener := tcp.NewListener(listenAddr, tlsConfig, cfg.AuthToken, tunnelManager, logger, portAllocator, cfg.Domain, cfg.TunnelDomain, cfg.PublicPort, httpHandler)
+	listener.SetAllowedTransports(cfg.AllowedTransports)
+	listener.SetAllowedTunnelTypes(cfg.AllowedTunnelTypes)
 
 	if err := listener.Start(); err != nil {
 		logger.Fatal("Failed to start TCP listener", zap.Error(err))
 	}
 
+	protocol := "TCP (plain)"
+	if cfg.TLSEnabled {
+		protocol = "TCP over TLS 1.3"
+	}
+
 	logger.Info("Drip Server started",
 		zap.String("address", listenAddr),
-		zap.String("domain", serverDomain),
-		zap.String("tunnel_domain", tunnelDomain),
-		zap.String("protocol", "TCP over TLS 1.3"),
-		zap.Strings("transports", serverConfig.AllowedTransports),
-		zap.Strings("tunnel_types", serverConfig.AllowedTunnelTypes),
+		zap.String("domain", cfg.Domain),
+		zap.String("tunnel_domain", cfg.TunnelDomain),
+		zap.String("protocol", protocol),
+		zap.Strings("transports", cfg.AllowedTransports),
+		zap.Strings("tunnel_types", cfg.AllowedTunnelTypes),
 	)
 
 	quit := make(chan os.Signal, 1)

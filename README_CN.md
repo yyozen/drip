@@ -9,10 +9,10 @@
   自建隧道方案，让你的服务安全地暴露到公网。
 </p>
 
-<p align="center ">
-  <a href="README.md">English</a>
+<p align="center">
+  <a href="https://driptunnel.app/en/docs">English</a>
   <span> | </span>
-  <a href="README_CN.md">中文文档</a>
+  <a href="https://driptunnel.app/docs">中文文档</a>
 </p>
 
 <div align="center">
@@ -23,296 +23,46 @@
 
 </div>
 
-> Drip 是一条安静、自律的隧道。  
+> Drip 是一条安静、自律的隧道。
 > 你在自己的网络里点亮一盏小灯，它便把光带出去——经过你自己的基础设施，按你自己的方式。
 
+## 为什么选择 Drip？
 
-## 为什么？
+- **掌控数据** - 没有第三方服务器，流量只在你的客户端与服务器之间传输
+- **没有限制** - 无限隧道、带宽和请求数
+- **真的免费** - 用你自己的域名，没有付费档位或功能阉割
+- **开源** - BSD 3-Clause 协议
 
-**掌控数据。** 没有第三方服务器，流量只在你的客户端与服务器之间传输。
+## 快速开始
 
-**没有限制。** 想开多少隧道就开多少，带宽只受你的服务器性能限制。
-
-**真的免费。** 用你自己的域名，没有付费档位或功能阉割。
-
-| 特性 | Drip | ngrok 免费 |
-|------|------|-----------|
-| 隐私 | 自己的基础设施 | 第三方服务器 |
-| 域名 | 你的域名 | 1 个固定子域名 |
-| 带宽 | 无限制 | 1 GB/月 |
-| 活跃端点 | 无限制 | 1 个端点 |
-| 每个 Agent 的隧道数 | 无限制 | 最多 3 条 |
-| 请求数 | 无限制 | 20,000 次/月 |
-| 中间页 | 无 | 有（加请求头可移除） |
-| 开源 | ✓ | ✗ |
-
-## 快速安装
+### 安装
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh)
+bash <(curl -sL https://driptunnel.app/install.sh)
 ```
 
-- 先选择语言，再选择安装 **客户端**（macOS/Linux）或 **服务器**（Linux）。
-- 非交互示例：
-  - 客户端：`bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --client`
-  - 服务器：`bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/install.sh) --server`
-
-### 卸载
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/Gouryella/drip/main/scripts/uninstall.sh)
-```
-
-## 使用
-
-### 首次配置
+### 基本使用
 
 ```bash
-# 配置服务器地址和 token（只需一次）
+# 配置（仅首次需要）
 drip config init
-```
 
-### 基础隧道
-
-```bash
 # 暴露本地 HTTP 服务
 drip http 3000
 
-# 暴露本地 HTTPS 服务
-drip https 443
-
-# 选择你的子域名
+# 使用自定义子域名
 drip http 3000 -n myapp
 # → https://myapp.your-domain.com
-
-# 暴露 TCP 服务（数据库、SSH 等）
-drip tcp 5432
 ```
 
-### 转发到任意地址
+## 文档
 
-不只是 localhost，可以转发到网络里的任何设备：
+完整文档请访问 **[driptunnel.app/docs](https://driptunnel.app/docs)**
 
-```bash
-# 转发到局域网其他机器
-drip http 8080 -a 192.168.1.100
-
-# 转发到 Docker 容器
-drip http 3000 -a 172.17.0.2
-
-# 转发到特定网卡
-drip http 3000 -a 10.0.0.5
-```
-
-### 后台模式
-
-使用 `-d` 让隧道在后台运行：
-
-```bash
-# 后台启动隧道
-drip http 3000 -d
-drip https 8443 -n api -d
-
-# 列出运行中的隧道
-drip list
-
-# 查看隧道日志
-drip attach http 3000
-
-# 停止隧道
-drip stop http 3000
-drip stop all
-```
-
-## 服务端部署
-
-### 前置条件
-
-- 域名 A 记录已指向服务器
-- 子域名的泛解析：`*.tunnel.example.com -> 你的 IP`
-- SSL 证书（推荐通配符）
-
-### 方案一：直接部署（推荐）
-
-Drip 服务端直接在 443 端口处理 TLS：
-
-```bash
-# 获取通配符证书
-sudo certbot certonly --manual --preferred-challenges dns \
-  -d "*.tunnel.example.com" -d "tunnel.example.com"
-
-# 启动服务
-drip-server \
-  --port 443 \
-  --domain tunnel.example.com \
-  --tls-cert /etc/letsencrypt/live/tunnel.example.com/fullchain.pem \
-  --tls-key /etc/letsencrypt/live/tunnel.example.com/privkey.pem \
-  --token 你的密钥
-```
-
-### 方案二：Nginx 反向代理
-
-Drip 监听 8443 端口，由 Nginx 负责 SSL 终止：
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name *.tunnel.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/tunnel.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tunnel.example.com/privkey.pem;
-
-    location / {
-        proxy_pass https://127.0.0.1:8443;
-        proxy_ssl_protocols TLSv1.3;
-        proxy_ssl_verify off;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_buffering off;
-    }
-}
-```
-
-### Systemd 服务
-
-安装脚本会自动创建 `/etc/systemd/system/drip-server.service`。管理方式：
-
-```bash
-sudo systemctl start drip-server
-sudo systemctl enable drip-server
-sudo journalctl -u drip-server -f
-```
-
-## 特性
-
-**安全性**
-- 所有连接使用 TLS 1.3 加密
-- 基于 Token 的身份验证
-- IP 白名单/黑名单访问控制
-- 不支持任何遗留协议
-
-**灵活性**
-- 支持 HTTP、HTTPS 和 TCP 隧道
-- 可以转发到 localhost 或任何局域网地址
-- 自定义子域名或自动生成
-- 守护模式保持隧道持久运行
-- 多种传输协议（TCP、WebSocket）
-
-**性能**
-- 二进制协议 + msgpack 编码
-- 连接池复用
-- 客户端与服务器之间的额外开销极小
-
-**简单**
-- 一行命令完成安装
-- 配置一次，到处可用
-- 实时查看连接统计
-
-## 架构
-
-```
-┌─────────────┐         ┌──────────────┐         ┌─────────────┐
-│  互联网用户  │ ──────> │     服务器    │ <────── │    客户端    │
-│             │  HTTPS  │    (Drip)    │ TLS 1.3 │  localhost  │
-└─────────────┘         └──────────────┘         └─────────────┘
-```
-
-## 常见场景
-
-**开发与测试**
-```bash
-# 把本地开发站点给客户预览
-drip http 3000
-
-# 测试第三方 webhook（如 Stripe）
-drip http 8000 -n webhooks
-```
-
-**家庭服务器访问**
-```bash
-# 远程访问家里的 NAS
-drip http 5000 -a 192.168.1.50
-
-# 通过 SSH 远程进入家庭网络
-drip tcp 22
-```
-
-**Docker 与容器**
-```bash
-# 暴露容器化应用
-drip http 8080 -a 172.17.0.3
-
-# 数据库调试
-drip tcp 5432 -a db-container
-```
-
-**IP 访问控制**
-```bash
-# 只允许特定网段访问（CIDR）
-drip http 3000 --allow-ip 192.168.0.0/16,10.0.0.0/8
-
-# 只允许特定 IP 访问
-drip http 3000 --allow-ip 192.168.1.100,192.168.1.101
-
-# 拒绝特定 IP
-drip http 3000 --deny-ip 1.2.3.4,5.6.7.8
-
-# 组合白名单和黑名单
-drip tcp 5432 --allow-ip 192.168.1.0/24 --deny-ip 192.168.1.100
-```
-
-**传输协议**
-```bash
-# 根据服务器自动选择传输协议（默认）
-drip http 3000 --transport auto
-
-# 使用直接 TLS 1.3 连接
-drip http 3000 --transport tcp
-
-# 使用 WebSocket over TLS（CDN 友好，可穿透 Cloudflare）
-drip http 3000 --transport wss
-```
-
-## 命令参考
-
-```bash
-# HTTP 隧道
-drip http <端口> [参数]
-  -n, --subdomain    自定义子域名
-  -a, --address      目标地址（默认：127.0.0.1）
-  -d, --daemon       后台运行
-  -s, --server       服务器地址
-  -t, --token        认证 token
-  --allow-ip         只允许这些 IP 或 CIDR 访问
-  --deny-ip          拒绝这些 IP 或 CIDR 访问
-  --transport        传输协议：auto, tcp, wss（默认：auto）
-
-# HTTPS 隧道（参数同 http）
-drip https <端口> [参数]
-
-# TCP 隧道（参数同 http）
-drip tcp <端口> [参数]
-
-# 后台隧道管理
-drip list              列出运行中的隧道
-drip list -i           交互模式
-drip attach [类型] [端口]   查看日志
-drip stop <类型> <端口>     停止隧道
-drip stop all               停止所有隧道
-
-# 配置
-drip config init       设置服务器和 token
-drip config show       显示当前配置
-drip config set <键> <值>
-```
-
-## 鸣谢
-
-- [yamux](https://github.com/hashicorp/yamux) - 为 Drip 的连接复用提供支持的流复用库
+- [安装指南](https://driptunnel.app/docs/installation)
+- [客户端使用](https://driptunnel.app/docs/client)
+- [服务端部署](https://driptunnel.app/docs/server)
+- [配置参考](https://driptunnel.app/docs/configuration)
 
 ## 协议
 

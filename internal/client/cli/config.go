@@ -15,7 +15,7 @@ import (
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage configuration",
-	Long:  "Manage Drip client configuration (server, token, etc.)",
+	Long:  "Manage Drip client configuration (server, token, tunnels)",
 }
 
 var configInitCmd = &cobra.Command{
@@ -135,6 +135,32 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 
 	fmt.Println(ui.RenderConfigShow(cfg.Server, displayToken, !configFull, cfg.TLS, config.DefaultClientConfigPath()))
 
+	// Show tunnels if configured
+	if len(cfg.Tunnels) > 0 {
+		fmt.Println()
+		fmt.Println(ui.Title("Configured Tunnels"))
+		for _, t := range cfg.Tunnels {
+			addr := t.Address
+			if addr == "" {
+				addr = "127.0.0.1"
+			}
+			fmt.Printf("  %-12s %-6s %s:%d", t.Name, t.Type, addr, t.Port)
+			if t.Subdomain != "" {
+				fmt.Printf("  subdomain=%s", t.Subdomain)
+			}
+			if t.Transport != "" {
+				fmt.Printf("  transport=%s", t.Transport)
+			}
+			if len(t.AllowIPs) > 0 {
+				fmt.Printf("  allow=%s", strings.Join(t.AllowIPs, ","))
+			}
+			if len(t.DenyIPs) > 0 {
+				fmt.Printf("  deny=%s", strings.Join(t.DenyIPs, ","))
+			}
+			fmt.Println()
+		}
+	}
+
 	return nil
 }
 
@@ -220,6 +246,24 @@ func runConfigValidate(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println(ui.RenderConfigValidation(serverValid, serverMsg, tokenSet, tokenMsg, tlsEnabled))
+
+	// Validate tunnels
+	if len(cfg.Tunnels) > 0 {
+		fmt.Println()
+		fmt.Println(ui.Title("Tunnel Validation"))
+		allValid := true
+		for _, t := range cfg.Tunnels {
+			if err := t.Validate(); err != nil {
+				fmt.Printf("  ✗ %s: %v\n", t.Name, err)
+				allValid = false
+			} else {
+				fmt.Printf("  ✓ %s: valid\n", t.Name)
+			}
+		}
+		if !allValid {
+			return fmt.Errorf("some tunnels have invalid configuration")
+		}
+	}
 
 	if !serverValid {
 		return fmt.Errorf("invalid configuration: %s", serverMsg)

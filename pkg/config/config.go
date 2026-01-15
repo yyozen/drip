@@ -4,36 +4,43 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ServerConfig holds the server configuration
 type ServerConfig struct {
-	Port         int
-	PublicPort   int    // Port to display in URLs (for reverse proxy scenarios)
-	Domain       string // Domain for client connections (e.g., connect.example.com)
-	TunnelDomain string // Domain for tunnel URLs (e.g., example.com for *.example.com)
+	Port         int    `yaml:"port"`
+	PublicPort   int    `yaml:"public_port"`   // Port to display in URLs (for reverse proxy scenarios)
+	Domain       string `yaml:"domain"`        // Domain for client connections (e.g., connect.example.com)
+	TunnelDomain string `yaml:"tunnel_domain"` // Domain for tunnel URLs (e.g., example.com for *.example.com)
 
 	// TCP tunnel dynamic port allocation
-	TCPPortMin int
-	TCPPortMax int
+	TCPPortMin int `yaml:"tcp_port_min"`
+	TCPPortMax int `yaml:"tcp_port_max"`
 
 	// TLS settings
-	TLSEnabled  bool
-	TLSCertFile string
-	TLSKeyFile  string
+	TLSEnabled  bool   `yaml:"tls_enabled"`
+	TLSCertFile string `yaml:"tls_cert"`
+	TLSKeyFile  string `yaml:"tls_key"`
 
 	// Security
-	AuthToken string
+	AuthToken    string `yaml:"token"`
+	MetricsToken string `yaml:"metrics_token"`
 
 	// Logging
-	Debug bool
+	Debug bool `yaml:"debug"`
+
+	// Performance
+	PprofPort int `yaml:"pprof_port"`
 
 	// Allowed transports: "tcp", "wss", or "tcp,wss" (default: "tcp,wss")
-	AllowedTransports []string
+	AllowedTransports []string `yaml:"transports"`
 
 	// Allowed tunnel types: "http", "https", "tcp" (default: all)
-	AllowedTunnelTypes []string
+	AllowedTunnelTypes []string `yaml:"tunnel_types"`
 }
 
 // Validate checks if the server configuration is valid
@@ -155,4 +162,74 @@ func GetClientTLSConfigInsecure() *tls.Config {
 			tls.TLS_CHACHA20_POLY1305_SHA256,
 		},
 	}
+}
+
+// DefaultServerConfigPath returns the default server configuration path
+func DefaultServerConfigPath() string {
+	// Check /etc/drip/config.yaml first (system-wide)
+	systemPath := "/etc/drip/config.yaml"
+	if _, err := os.Stat(systemPath); err == nil {
+		return systemPath
+	}
+
+	// Fall back to user home directory
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".drip/server.yaml"
+	}
+	return filepath.Join(home, ".drip", "server.yaml")
+}
+
+// LoadServerConfig loads server configuration from file
+func LoadServerConfig(path string) (*ServerConfig, error) {
+	if path == "" {
+		path = DefaultServerConfigPath()
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("config file not found at %s", path)
+		}
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config ServerConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return &config, nil
+}
+
+// SaveServerConfig saves server configuration to file
+func SaveServerConfig(config *ServerConfig, path string) error {
+	if path == "" {
+		path = DefaultServerConfigPath()
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// ServerConfigExists checks if server config file exists
+func ServerConfigExists(path string) bool {
+	if path == "" {
+		path = DefaultServerConfigPath()
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }

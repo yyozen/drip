@@ -114,10 +114,10 @@ func runServerConfigShow(_ *cobra.Command, _ []string) error {
 	}
 
 	// Configuration sources
-	fmt.Println("📋 Configuration Sources:")
+	fmt.Println("Configuration Sources:")
+	fmt.Println("  Command-line flags (highest priority)")
 	fmt.Println("  Environment variables (DRIP_*)")
-	fmt.Println("  Command-line flags")
-	fmt.Println("  Config file: /etc/drip/server.env")
+	fmt.Println("  Config file: /etc/drip/config.yaml or ~/.drip/server.yaml")
 	fmt.Println()
 
 	// Endpoints

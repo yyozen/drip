@@ -97,15 +97,25 @@ func NewListener(address string, tlsConfig *tls.Config, authToken string, manage
 func (l *Listener) Start() error {
 	var err error
 
-	l.listener, err = tls.Listen("tcp", l.address, l.tlsConfig)
-	if err != nil {
-		return fmt.Errorf("failed to start TLS listener: %w", err)
+	// Support both TLS and plain TCP modes
+	if l.tlsConfig != nil {
+		l.listener, err = tls.Listen("tcp", l.address, l.tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to start TLS listener: %w", err)
+		}
+		l.logger.Info("TCP listener started (TLS mode)",
+			zap.String("address", l.address),
+			zap.String("tls_version", "TLS 1.3"),
+		)
+	} else {
+		l.listener, err = net.Listen("tcp", l.address)
+		if err != nil {
+			return fmt.Errorf("failed to start TCP listener: %w", err)
+		}
+		l.logger.Info("TCP listener started (plain mode - for reverse proxy)",
+			zap.String("address", l.address),
+		)
 	}
-
-	l.logger.Info("TCP listener started",
-		zap.String("address", l.address),
-		zap.String("tls_version", "TLS 1.3"),
-	)
 
 	l.httpListener = newConnQueueListener(l.listener.Addr(), 4096)
 
@@ -205,56 +215,66 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		return
 	}
 
-	tlsConn, ok := netConn.(*tls.Conn)
-	if !ok {
-		l.logger.Error("Connection is not TLS")
-		return
-	}
+	// Handle TLS connections
+	if tlsConn, ok := netConn.(*tls.Conn); ok {
+		if err := tlsConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			l.logger.Warn("Failed to set read deadline",
+				zap.String("remote_addr", netConn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+			return
+		}
 
-	if err := tlsConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		l.logger.Warn("Failed to set read deadline",
+		if err := tlsConn.Handshake(); err != nil {
+			l.logger.Warn("TLS handshake failed",
+				zap.String("remote_addr", netConn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+			return
+		}
+
+		if err := tlsConn.SetReadDeadline(time.Time{}); err != nil {
+			l.logger.Warn("Failed to clear read deadline",
+				zap.String("remote_addr", netConn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+			return
+		}
+
+		if tcpConn, ok := tlsConn.NetConn().(*net.TCPConn); ok {
+			tcpConn.SetNoDelay(true)
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(30 * time.Second)
+			tcpConn.SetReadBuffer(256 * 1024)
+			tcpConn.SetWriteBuffer(256 * 1024)
+		}
+
+		state := tlsConn.ConnectionState()
+		l.logger.Info("New TLS connection",
 			zap.String("remote_addr", netConn.RemoteAddr().String()),
-			zap.Error(err),
+			zap.Uint16("tls_version", state.Version),
+			zap.String("cipher_suite", tls.CipherSuiteName(state.CipherSuite)),
 		)
-		return
-	}
 
-	if err := tlsConn.Handshake(); err != nil {
-		l.logger.Warn("TLS handshake failed",
+		if state.Version != tls.VersionTLS13 {
+			l.logger.Warn("Connection not using TLS 1.3",
+				zap.Uint16("version", state.Version),
+			)
+			return
+		}
+	} else {
+		// Handle plain TCP connections (reverse proxy mode)
+		if tcpConn, ok := netConn.(*net.TCPConn); ok {
+			tcpConn.SetNoDelay(true)
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(30 * time.Second)
+			tcpConn.SetReadBuffer(256 * 1024)
+			tcpConn.SetWriteBuffer(256 * 1024)
+		}
+
+		l.logger.Info("New plain TCP connection (reverse proxy mode)",
 			zap.String("remote_addr", netConn.RemoteAddr().String()),
-			zap.Error(err),
 		)
-		return
-	}
-
-	if err := tlsConn.SetReadDeadline(time.Time{}); err != nil {
-		l.logger.Warn("Failed to clear read deadline",
-			zap.String("remote_addr", netConn.RemoteAddr().String()),
-			zap.Error(err),
-		)
-		return
-	}
-
-	if tcpConn, ok := tlsConn.NetConn().(*net.TCPConn); ok {
-		tcpConn.SetNoDelay(true)
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		tcpConn.SetReadBuffer(256 * 1024)
-		tcpConn.SetWriteBuffer(256 * 1024)
-	}
-
-	state := tlsConn.ConnectionState()
-	l.logger.Info("New connection",
-		zap.String("remote_addr", netConn.RemoteAddr().String()),
-		zap.Uint16("tls_version", state.Version),
-		zap.String("cipher_suite", tls.CipherSuiteName(state.CipherSuite)),
-	)
-
-	if state.Version != tls.VersionTLS13 {
-		l.logger.Warn("Connection not using TLS 1.3",
-			zap.Uint16("version", state.Version),
-		)
-		return
 	}
 
 	conn := NewConnection(netConn, l.authToken, l.manager, l.logger, l.portAlloc, l.domain, l.tunnelDomain, l.publicPort, l.httpHandler, l.groupManager, l.httpListener)

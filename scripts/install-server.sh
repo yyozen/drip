@@ -929,11 +929,8 @@ LimitNPROC=4096
 # Working directory
 WorkingDirectory=${WORK_DIR}
 
-# Load environment variables from file
-EnvironmentFile=${CONFIG_DIR}/server.env
-
-# Start command (uses environment variables)
-ExecStart=${INSTALL_DIR}/drip server
+# Start command (uses config file)
+ExecStart=${INSTALL_DIR}/drip server --config ${CONFIG_DIR}/config.yaml
 
 # Logging
 StandardOutput=journal
@@ -972,30 +969,32 @@ configure_firewall() {
 save_config() {
     print_step "$(msg saving_config)"
 
-    cat > "$CONFIG_DIR/server.env" << EOF
+    cat > "$CONFIG_DIR/config.yaml" << EOF
 # Drip Server Configuration
 # Generated: $(date)
 # DO NOT SHARE THIS FILE - Contains sensitive information
 
 # Server settings
-DRIP_PORT=${PORT}
-DRIP_PUBLIC_PORT=${PUBLIC_PORT}
-DRIP_DOMAIN=${DOMAIN}
-DRIP_TOKEN=${TOKEN}
-DRIP_METRICS_TOKEN=${METRICS_TOKEN}
+port: ${PORT}
+public_port: ${PUBLIC_PORT}
+domain: ${DOMAIN}
+
+# Authentication
+token: ${TOKEN}
+metrics_token: ${METRICS_TOKEN}
 
 # TLS certificate paths
-DRIP_TLS_CERT=${CERT_PATH}
-DRIP_TLS_KEY=${KEY_PATH}
+tls_cert: ${CERT_PATH}
+tls_key: ${KEY_PATH}
 
 # TCP tunnel port range
-DRIP_TCP_PORT_MIN=${TCP_PORT_MIN}
-DRIP_TCP_PORT_MAX=${TCP_PORT_MAX}
+tcp_port_min: ${TCP_PORT_MIN}
+tcp_port_max: ${TCP_PORT_MAX}
 EOF
 
-    chmod 640 "$CONFIG_DIR/server.env"
-    chown root:"$SERVICE_USER" "$CONFIG_DIR/server.env"
-    print_success "$(msg config_saved): $CONFIG_DIR/server.env"
+    chmod 640 "$CONFIG_DIR/config.yaml"
+    chown root:"$SERVICE_USER" "$CONFIG_DIR/config.yaml"
+    print_success "$(msg config_saved): $CONFIG_DIR/config.yaml"
 }
 
 # ============================================================================

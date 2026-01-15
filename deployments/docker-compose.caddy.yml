@@ -1,0 +1,28 @@
+services:
+  caddy:
+    image: slothcroissant/caddy-cloudflaredns:latest
+    container_name: drip-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      CF_API_TOKEN: ${CF_API_TOKEN}
+
+  drip-server:
+    image: driptunnel/drip-server:${VERSION:-latest}
+    container_name: drip-server
+    restart: unless-stopped
+    ports:
+      - "20000-20100:20000-20100"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+
+volumes:
+  caddy-data:

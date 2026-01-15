@@ -76,7 +76,6 @@ func (p *BufferPool) Put(buf *[]byte) {
 	case SizeXLarge:
 		p.xlarge.Put(buf)
 	}
-	// Note: buffers with non-standard sizes are not pooled (let GC handle them)
 }
 
 var globalBufferPool = NewBufferPool()

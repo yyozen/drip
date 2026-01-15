@@ -1,0 +1,34 @@
+# Caddyfile for drip-server reverse proxy
+#
+# This configuration:
+#   - Obtains wildcard certificate via DNS challenge (Cloudflare)
+#   - Reverse proxies HTTPS/WSS traffic to drip-server
+#   - Handles all subdomains for tunnel routing
+#   - Supports WebSocket connections for WSS transport
+
+# Global options
+{
+	email {$ACME_EMAIL}
+}
+
+# Main domain and all subdomains
+{$DOMAIN}, *.{$DOMAIN} {
+	# Use DNS challenge for wildcard certificate
+	# Force TLS 1.3 only
+	tls {
+		dns cloudflare {$CF_API_TOKEN}
+		protocols tls1.3 tls1.3
+	}
+
+	# Reverse proxy to drip-server (plain TCP mode)
+	reverse_proxy drip-server:8443 {
+		# Pass original host header
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# Flush immediately for streaming/WebSocket
+		flush_interval -1
+	}
+}

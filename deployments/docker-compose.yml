@@ -1,0 +1,11 @@
+services:
+  drip-server:
+    image: driptunnel/drip-server:${VERSION:-latest}
+    container_name: drip-server
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "20000-20100:20000-20100"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./certs:/app/certs:ro
