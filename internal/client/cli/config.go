@@ -13,44 +13,56 @@ import (
 )
 
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage configuration",
-	Long:  "Manage Drip client configuration (server, token, tunnels)",
+	Use:           "config",
+	Short:         "Manage configuration",
+	Long:          "Manage Drip client configuration (server, token, tunnels)",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var configInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize configuration interactively",
-	Long:  "Initialize Drip configuration with interactive prompts",
-	RunE:  runConfigInit,
+	Use:           "init",
+	Short:         "Initialize configuration interactively",
+	Long:          "Initialize Drip configuration with interactive prompts",
+	RunE:          runConfigInit,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var configShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Show current configuration",
-	Long:  "Display the current Drip configuration",
-	RunE:  runConfigShow,
+	Use:           "show",
+	Short:         "Show current configuration",
+	Long:          "Display the current Drip configuration",
+	RunE:          runConfigShow,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var configSetCmd = &cobra.Command{
-	Use:   "set",
-	Short: "Set configuration values",
-	Long:  "Set specific configuration values (server, token)",
-	RunE:  runConfigSet,
+	Use:           "set",
+	Short:         "Set configuration values",
+	Long:          "Set specific configuration values (server, token)",
+	RunE:          runConfigSet,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var configResetCmd = &cobra.Command{
-	Use:   "reset",
-	Short: "Reset configuration",
-	Long:  "Delete the configuration file",
-	RunE:  runConfigReset,
+	Use:           "reset",
+	Short:         "Reset configuration",
+	Long:          "Delete the configuration file",
+	RunE:          runConfigReset,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var configValidateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate configuration",
-	Long:  "Validate the configuration file",
-	RunE:  runConfigValidate,
+	Use:           "validate",
+	Short:         "Validate configuration",
+	Long:          "Validate the configuration file",
+	RunE:          runConfigValidate,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 var (

@@ -33,6 +33,13 @@
 - **Actually free** - Use your own domain, no paid tiers or feature restrictions
 - **Open source** - BSD 3-Clause License
 
+## Recent Changes
+
+### 2025-01-29
+
+- **Bearer Token Authentication** - Added bearer token authentication support for tunnel access control
+- **Code Optimization** - Refactored large modules into smaller, focused components for better maintainability
+
 ## Quick Start
 
 ### Install

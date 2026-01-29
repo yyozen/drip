@@ -17,10 +17,10 @@ import (
 
 // sessionEntry represents a session with its current stream count for heap operations
 type sessionEntry struct {
-	id       string
-	session  *yamux.Session
-	streams  int
-	heapIdx  int // index in the heap, managed by heap.Interface
+	id      string
+	session *yamux.Session
+	streams int
+	heapIdx int // index in the heap, managed by heap.Interface
 }
 
 // sessionHeap implements heap.Interface for O(log n) session selection

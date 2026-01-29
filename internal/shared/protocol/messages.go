@@ -14,7 +14,9 @@ type IPAccessControl struct {
 
 type ProxyAuth struct {
 	Enabled  bool   `json:"enabled"`
+	Type     string `json:"type,omitempty"`
 	Password string `json:"password,omitempty"`
+	Token    string `json:"token,omitempty"`
 }
 
 type RegisterRequest struct {

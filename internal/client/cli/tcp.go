@@ -41,8 +41,10 @@ Transport options:
 
 Note: TCP tunnels require dynamic port allocation on the server.
       When using CDN (--transport wss), the server must still expose the allocated port directly.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runTCP,
+	Args:          cobra.ExactArgs(1),
+	RunE:          runTCP,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {

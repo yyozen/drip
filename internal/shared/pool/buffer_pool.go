@@ -3,10 +3,10 @@ package pool
 import "sync"
 
 const (
-	SizeSmall  = 4 * 1024     // 4KB   - HTTP headers, small messages
-	SizeMedium = 32 * 1024    // 32KB  - HTTP request/response bodies
-	SizeLarge  = 256 * 1024   // 256KB - Data pipe, file transfers
-	SizeXLarge = 1024 * 1024  // 1MB   - Large file transfers, bulk data
+	SizeSmall  = 4 * 1024    // 4KB   - HTTP headers, small messages
+	SizeMedium = 32 * 1024   // 32KB  - HTTP request/response bodies
+	SizeLarge  = 256 * 1024  // 256KB - Data pipe, file transfers
+	SizeXLarge = 1024 * 1024 // 1MB   - Large file transfers, bulk data
 )
 
 type BufferPool struct {

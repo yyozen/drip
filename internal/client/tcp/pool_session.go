@@ -188,7 +188,7 @@ func (c *PoolClient) addDataSession() error {
 		return fmt.Errorf("server does not support data connections")
 	}
 
-	conn, err := c.dial()
+	conn, err := c.dialer.Dial()
 	if err != nil {
 		return err
 	}

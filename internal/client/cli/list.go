@@ -33,8 +33,10 @@ This command shows:
 In interactive mode, you can select a tunnel to:
   - Attach: View real-time logs
   - Stop: Terminate the tunnel`,
-	Aliases: []string{"ls", "ps", "status"},
-	RunE:    runList,
+	Aliases:       []string{"ls", "ps", "status"},
+	RunE:          runList,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {

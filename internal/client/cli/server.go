@@ -22,28 +22,30 @@ import (
 )
 
 var (
-	serverPort           int
-	serverPublicPort     int
-	serverDomain         string
-	serverTunnelDomain   string
-	serverAuthToken      string
-	serverMetricsToken   string
-	serverDebug          bool
-	serverTCPPortMin     int
-	serverTCPPortMax     int
-	serverTLSCert        string
-	serverTLSKey         string
-	serverPprofPort      int
-	serverTransports     string
-	serverTunnelTypes    string
-	serverConfigFile     string
+	serverPort         int
+	serverPublicPort   int
+	serverDomain       string
+	serverTunnelDomain string
+	serverAuthToken    string
+	serverMetricsToken string
+	serverDebug        bool
+	serverTCPPortMin   int
+	serverTCPPortMax   int
+	serverTLSCert      string
+	serverTLSKey       string
+	serverPprofPort    int
+	serverTransports   string
+	serverTunnelTypes  string
+	serverConfigFile   string
 )
 
 var serverCmd = &cobra.Command{
-	Use:   "server",
-	Short: "Start Drip server",
-	Long:  `Start the Drip tunnel server to accept client connections`,
-	RunE:  runServer,
+	Use:           "server",
+	Short:         "Start Drip server",
+	Long:          `Start the Drip tunnel server to accept client connections`,
+	RunE:          runServer,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -285,11 +287,29 @@ func runServer(cmd *cobra.Command, _ []string) error {
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 
-	httpHandler := proxy.NewHandler(tunnelManager, logger, cfg.Domain, cfg.TunnelDomain, cfg.AuthToken, cfg.MetricsToken)
+	httpHandler := proxy.NewHandler(proxy.HandlerConfig{
+		Manager:      tunnelManager,
+		Logger:       logger,
+		ServerDomain: cfg.Domain,
+		TunnelDomain: cfg.TunnelDomain,
+		AuthToken:    cfg.AuthToken,
+		MetricsToken: cfg.MetricsToken,
+	})
 	httpHandler.SetAllowedTransports(cfg.AllowedTransports)
 	httpHandler.SetAllowedTunnelTypes(cfg.AllowedTunnelTypes)
 
-	listener := tcp.NewListener(listenAddr, tlsConfig, cfg.AuthToken, tunnelManager, logger, portAllocator, cfg.Domain, cfg.TunnelDomain, cfg.PublicPort, httpHandler)
+	listener := tcp.NewListener(tcp.ListenerConfig{
+		Address:      listenAddr,
+		TLSConfig:    tlsConfig,
+		AuthToken:    cfg.AuthToken,
+		Manager:      tunnelManager,
+		Logger:       logger,
+		PortAlloc:    portAllocator,
+		Domain:       cfg.Domain,
+		TunnelDomain: cfg.TunnelDomain,
+		PublicPort:   cfg.PublicPort,
+		HTTPHandler:  httpHandler,
+	})
 	listener.SetAllowedTransports(cfg.AllowedTransports)
 	listener.SetAllowedTunnelTypes(cfg.AllowedTunnelTypes)
 

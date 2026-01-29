@@ -31,12 +31,6 @@ var (
 	ErrRateLimitExceeded = errors.New("rate limit exceeded, try again later")
 )
 
-// rateLimitEntry tracks registration attempts per IP
-type rateLimitEntry struct {
-	count     int
-	windowEnd time.Time
-}
-
 // shard holds a subset of tunnels with its own lock
 type shard struct {
 	tunnels map[string]*Connection
@@ -52,16 +46,16 @@ type Manager struct {
 	// Limits
 	maxTunnels      int
 	maxTunnelsPerIP int
-	rateLimit       int
-	rateLimitWindow time.Duration
 
 	// Global counters (atomic for lock-free reads)
 	tunnelCount atomic.Int64
 
 	// Per-IP tracking (requires separate lock as it spans shards)
 	ipMu        sync.RWMutex
-	tunnelsByIP map[string]int             // IP -> tunnel count
-	rateLimits  map[string]*rateLimitEntry // IP -> rate limit entry
+	tunnelsByIP map[string]int // IP -> tunnel count
+
+	// Rate limiting
+	rateLimiter *RateLimiter
 
 	// Lifecycle
 	stopCh chan struct{}
@@ -71,7 +65,7 @@ type Manager struct {
 type ManagerConfig struct {
 	MaxTunnels      int
 	MaxTunnelsPerIP int
-	RateLimit       int           // Registrations per IP per window
+	RateLimit       int // Registrations per IP per window
 	RateLimitWindow time.Duration
 }
 
@@ -117,10 +111,8 @@ func NewManagerWithConfig(logger *zap.Logger, cfg ManagerConfig) *Manager {
 		logger:          logger,
 		maxTunnels:      cfg.MaxTunnels,
 		maxTunnelsPerIP: cfg.MaxTunnelsPerIP,
-		rateLimit:       cfg.RateLimit,
-		rateLimitWindow: cfg.RateLimitWindow,
 		tunnelsByIP:     make(map[string]int),
-		rateLimits:      make(map[string]*rateLimitEntry),
+		rateLimiter:     NewRateLimiter(cfg.RateLimit, cfg.RateLimitWindow, logger),
 		stopCh:          make(chan struct{}),
 	}
 
@@ -138,28 +130,6 @@ func (m *Manager) getShard(subdomain string) *shard {
 	h := fnv.New32a()
 	h.Write([]byte(subdomain))
 	return &m.shards[h.Sum32()%numShards]
-}
-
-// checkRateLimit checks if the IP has exceeded rate limit (caller must hold ipMu)
-func (m *Manager) checkRateLimitLocked(ip string) bool {
-	now := time.Now()
-	entry, exists := m.rateLimits[ip]
-
-	if !exists || now.After(entry.windowEnd) {
-		// New window
-		m.rateLimits[ip] = &rateLimitEntry{
-			count:     1,
-			windowEnd: now.Add(m.rateLimitWindow),
-		}
-		return true
-	}
-
-	if entry.count >= m.rateLimit {
-		return false
-	}
-
-	entry.count++
-	return true
 }
 
 // Register registers a new tunnel connection with IP-based limits
@@ -193,19 +163,14 @@ func (m *Manager) RegisterWithIP(conn *websocket.Conn, customSubdomain string, r
 
 	// Check per-IP limits and reserve slot atomically
 	if remoteIP != "" {
-		m.ipMu.Lock()
-		if !m.checkRateLimitLocked(remoteIP) {
-			m.ipMu.Unlock()
+		// Check rate limit first (has its own lock)
+		if !m.rateLimiter.CheckAndIncrement(remoteIP) {
 			rollbackGlobal()
-			m.logger.Warn("Rate limit exceeded",
-				zap.String("ip", remoteIP),
-				zap.Int("limit", m.rateLimit),
-			)
-			metrics.RateLimitRejections.WithLabelValues("registration", remoteIP).Inc()
 			metrics.TunnelRegistrationFailures.WithLabelValues("rate_limit").Inc()
 			return "", ErrRateLimitExceeded
 		}
 
+		m.ipMu.Lock()
 		if m.tunnelsByIP[remoteIP] >= m.maxTunnelsPerIP {
 			currentPerIP := m.tunnelsByIP[remoteIP]
 			m.ipMu.Unlock()
@@ -427,14 +392,7 @@ func (m *Manager) CleanupStale(timeout time.Duration) int {
 	}
 
 	// Cleanup expired rate limit entries
-	m.ipMu.Lock()
-	now := time.Now()
-	for ip, entry := range m.rateLimits {
-		if now.After(entry.windowEnd) {
-			delete(m.rateLimits, ip)
-		}
-	}
-	m.ipMu.Unlock()
+	m.rateLimiter.Cleanup()
 
 	if totalCleaned > 0 {
 		m.logger.Info("Cleaned up stale tunnels",

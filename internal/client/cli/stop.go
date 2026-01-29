@@ -19,9 +19,11 @@ Examples:
   drip stop all          Stop all running tunnels
 
 Use 'drip list' to see running tunnels.`,
-	Aliases: []string{"kill"},
-	Args:    cobra.MinimumNArgs(1),
-	RunE:    runStop,
+	Aliases:       []string{"kill"},
+	Args:          cobra.MinimumNArgs(1),
+	RunE:          runStop,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {

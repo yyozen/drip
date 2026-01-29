@@ -19,6 +19,7 @@ var (
 	allowIPs     []string
 	denyIPs      []string
 	authPass     string
+	authBearer   string
 	transport    string
 )
 
@@ -34,6 +35,7 @@ Example:
   drip http 3000 --allow-ip 10.0.0.1        Allow single IP
   drip http 3000 --deny-ip 1.2.3.4          Block specific IP
   drip http 3000 --auth secret              Enable proxy authentication with password
+  drip http 3000 --auth-bearer sk-xxx       Enable proxy authentication with bearer token
   drip http 3000 --transport wss            Use WebSocket over TLS (CDN-friendly)
 
 Configuration:
@@ -44,8 +46,10 @@ Transport options:
   auto  - Automatically select based on server address (default)
   tcp   - Direct TLS 1.3 connection
   wss   - WebSocket over TLS (works through CDN like Cloudflare)`,
-	Args: cobra.ExactArgs(1),
-	RunE: runHTTP,
+	Args:          cobra.ExactArgs(1),
+	RunE:          runHTTP,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -55,6 +59,7 @@ func init() {
 	httpCmd.Flags().StringSliceVar(&allowIPs, "allow-ip", nil, "Allow only these IPs or CIDR ranges (e.g., 192.168.1.1,10.0.0.0/8)")
 	httpCmd.Flags().StringSliceVar(&denyIPs, "deny-ip", nil, "Deny these IPs or CIDR ranges (e.g., 1.2.3.4,192.168.1.0/24)")
 	httpCmd.Flags().StringVar(&authPass, "auth", "", "Password for proxy authentication")
+	httpCmd.Flags().StringVar(&authBearer, "auth-bearer", "", "Bearer token for proxy authentication")
 	httpCmd.Flags().StringVar(&transport, "transport", "auto", "Transport protocol: auto, tcp, wss (WebSocket over TLS)")
 	httpCmd.Flags().BoolVar(&daemonMarker, "daemon-child", false, "Internal flag for daemon child process")
 	httpCmd.Flags().MarkHidden("daemon-child")
@@ -69,6 +74,10 @@ func runHTTP(_ *cobra.Command, args []string) error {
 
 	if daemonMode && !daemonMarker {
 		return StartDaemon("http", port, buildDaemonArgs("http", args, subdomain, localAddress))
+	}
+
+	if authPass != "" && authBearer != "" {
+		return fmt.Errorf("cannot use --auth and --auth-bearer together")
 	}
 
 	serverAddr, token, err := resolveServerAddrAndToken("http", port)
@@ -87,6 +96,7 @@ func runHTTP(_ *cobra.Command, args []string) error {
 		AllowIPs:   allowIPs,
 		DenyIPs:    denyIPs,
 		AuthPass:   authPass,
+		AuthBearer: authBearer,
 		Transport:  parseTransport(transport),
 	}
 

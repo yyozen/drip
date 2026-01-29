@@ -41,7 +41,8 @@ type ConnectorConfig struct {
 	DenyIPs  []string
 
 	// Proxy authentication
-	AuthPass string
+	AuthPass   string
+	AuthBearer string
 
 	// Transport protocol selection
 	Transport TransportType

@@ -54,7 +54,9 @@ Configuration file example (~/.drip/config.yaml):
       allow_ips:
         - 192.168.0.0/16
         - 10.0.0.0/8`,
-	RunE: runStart,
+	RunE:          runStart,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
@@ -238,6 +240,7 @@ func buildConnectorConfig(cfg *config.ClientConfig, t *config.TunnelConfig) *tcp
 		AllowIPs:   t.AllowIPs,
 		DenyIPs:    t.DenyIPs,
 		AuthPass:   t.Auth,
+		AuthBearer: t.AuthBearer,
 		Transport:  transport,
 	}
 }

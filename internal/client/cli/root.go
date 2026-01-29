@@ -45,6 +45,8 @@ Features:
   ✓ Auto-save configuration
   ✓ Custom subdomains
   ✓ Authentication via token`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {

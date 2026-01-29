@@ -35,6 +35,11 @@ func (c *Connection) handleTCPTunnel(reader *bufio.Reader) error {
 	}
 	c.session = session
 
+	// Update lifecycle manager with session
+	if c.lifecycleManager != nil {
+		c.lifecycleManager.SetSession(session)
+	}
+
 	openStream := session.Open
 	if c.groupManager != nil {
 		if group, ok := c.groupManager.GetGroup(c.tunnelID); ok && group != nil {
@@ -46,6 +51,11 @@ func (c *Connection) handleTCPTunnel(reader *bufio.Reader) error {
 	c.proxy = NewProxy(c.ctx, c.port, c.subdomain, openStream, c.tunnelConn, c.logger)
 	if c.tunnelConn != nil && c.tunnelConn.HasIPAccessControl() {
 		c.proxy.SetIPAccessCheck(c.tunnelConn.IsIPAllowed)
+	}
+
+	// Update lifecycle manager with proxy
+	if c.lifecycleManager != nil {
+		c.lifecycleManager.SetProxy(c.proxy)
 	}
 
 	if err := c.proxy.Start(); err != nil {
@@ -75,6 +85,11 @@ func (c *Connection) handleHTTPProxyTunnel(reader *bufio.Reader) error {
 		return fmt.Errorf("failed to init yamux session: %w", err)
 	}
 	c.session = session
+
+	// Update lifecycle manager with session
+	if c.lifecycleManager != nil {
+		c.lifecycleManager.SetSession(session)
+	}
 
 	openStream := session.Open
 	if c.groupManager != nil {

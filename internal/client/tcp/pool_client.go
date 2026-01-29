@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
 	json "github.com/goccy/go-json"
 	"github.com/hashicorp/yamux"
 	"go.uber.org/zap"
@@ -22,7 +21,6 @@ import (
 	"drip/internal/shared/mux"
 	"drip/internal/shared/protocol"
 	"drip/internal/shared/stats"
-	"drip/internal/shared/wsutil"
 	"drip/pkg/config"
 )
 
@@ -71,11 +69,18 @@ type PoolClient struct {
 	allowIPs []string
 	denyIPs  []string
 
-	authPass string
+	authPass   string
+	authBearer string
 
 	// Transport protocol selection
 	transport TransportType
 	insecure  bool
+
+	// Connection dialer
+	dialer *ConnectionDialer
+
+	// Session scaler
+	scaler *SessionScaler
 }
 
 // NewPoolClient creates a new pool client.
@@ -169,8 +174,10 @@ func NewPoolClient(cfg *ConnectorConfig, logger *zap.Logger) *PoolClient {
 		allowIPs:        cfg.AllowIPs,
 		denyIPs:         cfg.DenyIPs,
 		authPass:        cfg.AuthPass,
+		authBearer:      cfg.AuthBearer,
 		transport:       transport,
 		insecure:        cfg.Insecure,
+		dialer:          NewConnectionDialer(serverAddr, tlsConfig, cfg.Token, transport, logger),
 	}
 
 	if tunnelType == protocol.TunnelTypeHTTP || tunnelType == protocol.TunnelTypeHTTPS {
@@ -183,7 +190,7 @@ func NewPoolClient(cfg *ConnectorConfig, logger *zap.Logger) *PoolClient {
 
 // Connect establishes the primary connection and starts background workers.
 func (c *PoolClient) Connect() error {
-	primaryConn, err := c.dial()
+	primaryConn, err := c.dialer.Dial()
 	if err != nil {
 		return err
 	}
@@ -208,9 +215,16 @@ func (c *PoolClient) Connect() error {
 		}
 	}
 
-	if c.authPass != "" {
+	if c.authBearer != "" {
+		req.ProxyAuth = &protocol.ProxyAuth{
+			Enabled: true,
+			Type:    "bearer",
+			Token:   c.authBearer,
+		}
+	} else if c.authPass != "" {
 		req.ProxyAuth = &protocol.ProxyAuth{
 			Enabled:  true,
+			Type:     "password",
 			Password: c.authPass,
 		}
 	}
@@ -299,8 +313,9 @@ func (c *PoolClient) Connect() error {
 
 		c.warmupSessions()
 
-		c.wg.Add(1)
-		go c.scalerLoop()
+		// Initialize and start session scaler
+		c.scaler = NewSessionScaler(c, c.logger, c.stopCh, &c.wg)
+		c.scaler.Start()
 	}
 
 	go func() {
@@ -309,162 +324,6 @@ func (c *PoolClient) Connect() error {
 	}()
 
 	return nil
-}
-
-func (c *PoolClient) dialTLS() (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", c.serverAddr, c.tlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
-	}
-
-	state := conn.ConnectionState()
-	if state.Version != tls.VersionTLS13 {
-		_ = conn.Close()
-		return nil, fmt.Errorf("server not using TLS 1.3 (version: 0x%04x)", state.Version)
-	}
-
-	if tcpConn, ok := conn.NetConn().(*net.TCPConn); ok {
-		_ = tcpConn.SetNoDelay(true)
-		_ = tcpConn.SetKeepAlive(true)
-		_ = tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		_ = tcpConn.SetReadBuffer(256 * 1024)
-		_ = tcpConn.SetWriteBuffer(256 * 1024)
-	}
-
-	return conn, nil
-}
-
-// serverCapabilities holds the discovered server capabilities
-type serverCapabilities struct {
-	Transports []string `json:"transports"`
-	Preferred  string   `json:"preferred"`
-}
-
-// dial selects the appropriate transport and establishes a connection
-func (c *PoolClient) dial() (net.Conn, error) {
-	switch c.transport {
-	case TransportWebSocket:
-		return c.dialWebSocket()
-	case TransportTCP:
-		// User explicitly requested TCP, verify server supports it
-		caps := c.discoverServerCapabilities()
-		if caps != nil && len(caps.Transports) > 0 {
-			tcpSupported := false
-			for _, t := range caps.Transports {
-				if t == "tcp" {
-					tcpSupported = true
-					break
-				}
-			}
-			if !tcpSupported {
-				return nil, fmt.Errorf("server only supports %v transport(s), but --transport tcp was specified. Use --transport wss instead", caps.Transports)
-			}
-		}
-		return c.dialTLS()
-	default: // TransportAuto
-		// Check if server address indicates WebSocket
-		if strings.HasPrefix(c.serverAddr, "wss://") {
-			return c.dialWebSocket()
-		}
-		// Query server for preferred transport
-		caps := c.discoverServerCapabilities()
-		if caps != nil && caps.Preferred == "wss" {
-			return c.dialWebSocket()
-		}
-		// Default to TCP
-		return c.dialTLS()
-	}
-}
-
-// discoverServerCapabilities queries the server for its capabilities
-func (c *PoolClient) discoverServerCapabilities() *serverCapabilities {
-	host, port, err := net.SplitHostPort(c.serverAddr)
-	if err != nil {
-		host = c.serverAddr
-		port = "443"
-	}
-
-	discoverURL := fmt.Sprintf("https://%s:%s/_drip/discover", host, port)
-
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: c.tlsConfig,
-		},
-	}
-
-	resp, err := client.Get(discoverURL)
-	if err != nil {
-		c.logger.Debug("Failed to discover server capabilities",
-			zap.Error(err),
-		)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-
-	var caps serverCapabilities
-	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
-		return nil
-	}
-
-	c.logger.Debug("Discovered server capabilities",
-		zap.Strings("transports", caps.Transports),
-		zap.String("preferred", caps.Preferred),
-	)
-
-	return &caps
-}
-
-// dialWebSocket establishes a WebSocket connection to the server over TLS
-func (c *PoolClient) dialWebSocket() (net.Conn, error) {
-	// Build WebSocket URL
-	host, port, err := net.SplitHostPort(c.serverAddr)
-	if err != nil {
-		// No port specified, use default
-		host = c.serverAddr
-		port = "443"
-	}
-
-	wsURL := fmt.Sprintf("wss://%s:%s/_drip/ws", host, port)
-
-	c.logger.Debug("Connecting via WebSocket over TLS",
-		zap.String("url", wsURL),
-	)
-
-	dialer := websocket.Dialer{
-		TLSClientConfig:  c.tlsConfig,
-		HandshakeTimeout: 10 * time.Second,
-		ReadBufferSize:   256 * 1024,
-		WriteBufferSize:  256 * 1024,
-	}
-
-	// Add authorization header if token is set
-	header := http.Header{}
-	if c.token != "" {
-		header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	ws, resp, err := dialer.Dial(wsURL, header)
-	if err != nil {
-		if resp != nil {
-			return nil, fmt.Errorf("WebSocket dial failed (status %d): %w", resp.StatusCode, err)
-		}
-		return nil, fmt.Errorf("WebSocket dial failed: %w", err)
-	}
-
-	// Wrap WebSocket as net.Conn with ping loop for CDN keep-alive
-	conn := wsutil.NewConnWithPing(ws, 30*time.Second)
-
-	c.logger.Debug("WebSocket connection established",
-		zap.String("remote_addr", ws.RemoteAddr().String()),
-	)
-
-	return conn, nil
 }
 
 func (c *PoolClient) acceptLoop(h *sessionHandle, isPrimary bool) {
@@ -623,12 +482,12 @@ func (c *PoolClient) Close() error {
 	return closeErr
 }
 
-func (c *PoolClient) Wait()                              { <-c.doneCh }
-func (c *PoolClient) GetURL() string                     { return c.assignedURL }
-func (c *PoolClient) GetSubdomain() string               { return c.subdomain }
-func (c *PoolClient) GetLatency() time.Duration          { return time.Duration(c.latencyNanos.Load()) }
-func (c *PoolClient) GetStats() *stats.TrafficStats      { return c.stats }
-func (c *PoolClient) IsClosed() bool                     { return c.closed.Load() }
+func (c *PoolClient) Wait()                         { <-c.doneCh }
+func (c *PoolClient) GetURL() string                { return c.assignedURL }
+func (c *PoolClient) GetSubdomain() string          { return c.subdomain }
+func (c *PoolClient) GetLatency() time.Duration     { return time.Duration(c.latencyNanos.Load()) }
+func (c *PoolClient) GetStats() *stats.TrafficStats { return c.stats }
+func (c *PoolClient) IsClosed() bool                { return c.closed.Load() }
 
 func (c *PoolClient) SetLatencyCallback(cb LatencyCallback) {
 	if cb == nil {

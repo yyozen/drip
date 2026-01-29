@@ -12,15 +12,16 @@ import (
 
 // TunnelConfig holds configuration for a predefined tunnel
 type TunnelConfig struct {
-	Name      string   `yaml:"name"`                // Tunnel name (required, unique identifier)
-	Type      string   `yaml:"type"`                // Tunnel type: http, https, tcp (required)
-	Port      int      `yaml:"port"`                // Local port to forward (required)
-	Address   string   `yaml:"address,omitempty"`   // Local address (default: 127.0.0.1)
-	Subdomain string   `yaml:"subdomain,omitempty"` // Custom subdomain
-	Transport string   `yaml:"transport,omitempty"` // Transport: auto, tcp, wss
-	AllowIPs  []string `yaml:"allow_ips,omitempty"` // Allowed IPs/CIDRs
-	DenyIPs   []string `yaml:"deny_ips,omitempty"`  // Denied IPs/CIDRs
-	Auth      string   `yaml:"auth,omitempty"`      // Proxy authentication password (http/https only)
+	Name       string   `yaml:"name"`                  // Tunnel name (required, unique identifier)
+	Type       string   `yaml:"type"`                  // Tunnel type: http, https, tcp (required)
+	Port       int      `yaml:"port"`                  // Local port to forward (required)
+	Address    string   `yaml:"address,omitempty"`     // Local address (default: 127.0.0.1)
+	Subdomain  string   `yaml:"subdomain,omitempty"`   // Custom subdomain
+	Transport  string   `yaml:"transport,omitempty"`   // Transport: auto, tcp, wss
+	AllowIPs   []string `yaml:"allow_ips,omitempty"`   // Allowed IPs/CIDRs
+	DenyIPs    []string `yaml:"deny_ips,omitempty"`    // Denied IPs/CIDRs
+	Auth       string   `yaml:"auth,omitempty"`        // Proxy authentication password (http/https only)
+	AuthBearer string   `yaml:"auth_bearer,omitempty"` // Proxy authentication bearer token (http/https only)
 }
 
 // Validate checks if the tunnel configuration is valid
@@ -43,6 +44,9 @@ func (t *TunnelConfig) Validate() error {
 		if t.Transport != "auto" && t.Transport != "tcp" && t.Transport != "wss" {
 			return fmt.Errorf("invalid transport '%s' for '%s': must be auto, tcp, or wss", t.Transport, t.Name)
 		}
+	}
+	if t.Auth != "" && t.AuthBearer != "" {
+		return fmt.Errorf("only one of auth or auth_bearer can be set for '%s'", t.Name)
 	}
 	return nil
 }

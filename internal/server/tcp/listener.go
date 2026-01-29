@@ -15,10 +15,24 @@ import (
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/pool"
 	"drip/internal/shared/recovery"
+	"drip/internal/shared/utils"
 
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 )
+
+type ListenerConfig struct {
+	Address      string
+	TLSConfig    *tls.Config
+	AuthToken    string
+	Manager      *tunnel.Manager
+	Logger       *zap.Logger
+	PortAlloc    *PortAllocator
+	Domain       string
+	TunnelDomain string
+	PublicPort   int
+	HTTPHandler  http.Handler
+}
 
 type Listener struct {
 	address      string
@@ -48,47 +62,47 @@ type Listener struct {
 	allowedTunnelTypes []string
 }
 
-func NewListener(address string, tlsConfig *tls.Config, authToken string, manager *tunnel.Manager, logger *zap.Logger, portAlloc *PortAllocator, domain string, tunnelDomain string, publicPort int, httpHandler http.Handler) *Listener {
+func NewListener(cfg ListenerConfig) *Listener {
 	numCPU := pool.NumCPU()
 	workers := numCPU * 5
 	queueSize := workers * 20
 	workerPool := pool.NewWorkerPool(workers, queueSize)
 
-	logger.Info("Worker pool configured",
+	cfg.Logger.Info("Worker pool configured",
 		zap.Int("cpu_cores", numCPU),
 		zap.Int("workers", workers),
 		zap.Int("queue_size", queueSize),
 	)
 
-	panicMetrics := recovery.NewPanicMetrics(logger, nil)
-	recoverer := recovery.NewRecoverer(logger, panicMetrics)
+	panicMetrics := recovery.NewPanicMetrics(cfg.Logger, nil)
+	recoverer := recovery.NewRecoverer(cfg.Logger, panicMetrics)
 
 	// Initialize worker pool metrics
 	metrics.WorkerPoolSize.Set(float64(workers))
 
 	l := &Listener{
-		address:      address,
-		tlsConfig:    tlsConfig,
-		authToken:    authToken,
-		manager:      manager,
-		portAlloc:    portAlloc,
-		logger:       logger,
-		domain:       domain,
-		tunnelDomain: tunnelDomain,
-		publicPort:   publicPort,
-		httpHandler:  httpHandler,
+		address:      cfg.Address,
+		tlsConfig:    cfg.TLSConfig,
+		authToken:    cfg.AuthToken,
+		manager:      cfg.Manager,
+		portAlloc:    cfg.PortAlloc,
+		logger:       cfg.Logger,
+		domain:       cfg.Domain,
+		tunnelDomain: cfg.TunnelDomain,
+		publicPort:   cfg.PublicPort,
+		httpHandler:  cfg.HTTPHandler,
 		stopCh:       make(chan struct{}),
 		connections:  make(map[string]*Connection),
 		workerPool:   workerPool,
 		recoverer:    recoverer,
 		panicMetrics: panicMetrics,
-		groupManager: NewConnectionGroupManager(logger),
+		groupManager: NewConnectionGroupManager(cfg.Logger),
 	}
 
 	// Set up WebSocket connection handler if httpHandler supports it
-	if h, ok := httpHandler.(*proxy.Handler); ok {
+	if h, ok := cfg.HTTPHandler.(*proxy.Handler); ok {
 		h.SetWSConnectionHandler(l)
-		h.SetPublicPort(publicPort)
+		h.SetPublicPort(cfg.PublicPort)
 	}
 
 	return l
@@ -269,7 +283,19 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		)
 	}
 
-	conn := NewConnection(netConn, l.authToken, l.manager, l.logger, l.portAlloc, l.domain, l.tunnelDomain, l.publicPort, l.httpHandler, l.groupManager, l.httpListener)
+	conn := NewConnection(ConnectionConfig{
+		Conn:         netConn,
+		AuthToken:    l.authToken,
+		Manager:      l.manager,
+		Logger:       l.logger,
+		PortAlloc:    l.portAlloc,
+		Domain:       l.domain,
+		TunnelDomain: l.tunnelDomain,
+		PublicPort:   l.publicPort,
+		HTTPHandler:  l.httpHandler,
+		GroupManager: l.groupManager,
+		HTTPListener: l.httpListener,
+	})
 	conn.SetAllowedTunnelTypes(l.allowedTunnelTypes)
 	conn.SetAllowedTransports(l.allowedTransports)
 
@@ -297,18 +323,11 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 	if err := conn.Handle(); err != nil {
 		errStr := err.Error()
 
-		if strings.Contains(errStr, "EOF") ||
-			strings.Contains(errStr, "connection reset by peer") ||
-			strings.Contains(errStr, "broken pipe") ||
-			strings.Contains(errStr, "connection refused") {
+		if utils.IsNetworkError(errStr) {
 			return
 		}
 
-		if strings.Contains(errStr, "payload too large") ||
-			strings.Contains(errStr, "failed to read registration frame") ||
-			strings.Contains(errStr, "expected register frame") ||
-			strings.Contains(errStr, "failed to parse registration request") ||
-			strings.Contains(errStr, "failed to parse HTTP request") {
+		if utils.IsProtocolError(errStr) {
 			l.logger.Warn("Protocol validation failed",
 				zap.String("remote_addr", connID),
 				zap.Error(err),
@@ -387,7 +406,19 @@ func (l *Listener) HandleWSConnection(conn net.Conn, remoteAddr string) {
 	)
 
 	// Create connection handler (no TLS verification needed - already done by HTTP server)
-	tcpConn := NewConnection(conn, l.authToken, l.manager, l.logger, l.portAlloc, l.domain, l.tunnelDomain, l.publicPort, l.httpHandler, l.groupManager, l.httpListener)
+	tcpConn := NewConnection(ConnectionConfig{
+		Conn:         conn,
+		AuthToken:    l.authToken,
+		Manager:      l.manager,
+		Logger:       l.logger,
+		PortAlloc:    l.portAlloc,
+		Domain:       l.domain,
+		TunnelDomain: l.tunnelDomain,
+		PublicPort:   l.publicPort,
+		HTTPHandler:  l.httpHandler,
+		GroupManager: l.groupManager,
+		HTTPListener: l.httpListener,
+	})
 	tcpConn.SetAllowedTunnelTypes(l.allowedTunnelTypes)
 
 	l.connMu.Lock()
@@ -412,19 +443,11 @@ func (l *Listener) HandleWSConnection(conn net.Conn, remoteAddr string) {
 	if err := tcpConn.Handle(); err != nil {
 		errStr := err.Error()
 
-		if strings.Contains(errStr, "EOF") ||
-			strings.Contains(errStr, "connection reset by peer") ||
-			strings.Contains(errStr, "broken pipe") ||
-			strings.Contains(errStr, "connection refused") ||
-			strings.Contains(errStr, "websocket: close") {
+		if utils.IsNetworkError(errStr) {
 			return
 		}
 
-		if strings.Contains(errStr, "payload too large") ||
-			strings.Contains(errStr, "failed to read registration frame") ||
-			strings.Contains(errStr, "expected register frame") ||
-			strings.Contains(errStr, "failed to parse registration request") ||
-			strings.Contains(errStr, "tunnel type not allowed") {
+		if utils.IsProtocolError(errStr) {
 			l.logger.Warn("WebSocket tunnel protocol validation failed",
 				zap.String("remote_addr", connID),
 				zap.Error(err),

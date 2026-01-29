@@ -28,9 +28,11 @@ Examples:
   drip attach tcp 5432     Attach to TCP tunnel on port 5432
 
 Press Ctrl+C to detach (tunnel will continue running).`,
-	Aliases: []string{"logs", "tail"},
-	Args:    cobra.MaximumNArgs(2),
-	RunE:    runAttach,
+	Aliases:       []string{"logs", "tail"},
+	Args:          cobra.MaximumNArgs(2),
+	RunE:          runAttach,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func init() {
