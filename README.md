@@ -35,6 +35,22 @@
 
 ## Recent Changes
 
+### 2025-02-14
+
+- **Bandwidth Limiting (QoS)** - Per-tunnel bandwidth control with token bucket algorithm, server enforces `min(client, server)` as effective limit
+- **Transport Protocol Control** - Support independent configuration for service domain and tunnel domain
+
+```bash
+# Client: limit to 1MB/s
+drip http 3000 --bandwidth 1M
+```
+
+```yaml
+# Server: global limit (config.yaml)
+bandwidth: 10M
+burst_multiplier: 2.5
+```
+
 ### 2025-01-29
 
 - **Bearer Token Authentication** - Added bearer token authentication support for tunnel access control

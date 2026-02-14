@@ -313,6 +313,24 @@ func runServer(cmd *cobra.Command, _ []string) error {
 	listener.SetAllowedTransports(cfg.AllowedTransports)
 	listener.SetAllowedTunnelTypes(cfg.AllowedTunnelTypes)
 
+	bandwidth, err := parseBandwidth(cfg.Bandwidth)
+	if err != nil {
+		logger.Fatal("Invalid bandwidth configuration", zap.Error(err))
+	}
+	burstMultiplier := cfg.BurstMultiplier
+	if burstMultiplier <= 0 {
+		burstMultiplier = 2.0
+	}
+	listener.SetBandwidth(bandwidth)
+	listener.SetBurstMultiplier(burstMultiplier)
+	if bandwidth > 0 {
+		logger.Info("Bandwidth limit configured",
+			zap.String("bandwidth", cfg.Bandwidth),
+			zap.Int64("bandwidth_bytes_sec", bandwidth),
+			zap.Float64("burst_multiplier", burstMultiplier),
+		)
+	}
+
 	if err := listener.Start(); err != nil {
 		logger.Fatal("Failed to start TCP listener", zap.Error(err))
 	}

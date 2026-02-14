@@ -60,6 +60,8 @@ type Listener struct {
 	// Server capabilities
 	allowedTransports  []string
 	allowedTunnelTypes []string
+	bandwidth          int64
+	burstMultiplier    float64
 }
 
 func NewListener(cfg ListenerConfig) *Listener {
@@ -298,6 +300,7 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 	})
 	conn.SetAllowedTunnelTypes(l.allowedTunnelTypes)
 	conn.SetAllowedTransports(l.allowedTransports)
+	conn.SetBandwidthConfig(l.bandwidth, l.burstMultiplier)
 
 	connID := netConn.RemoteAddr().String()
 	l.connMu.Lock()
@@ -420,6 +423,8 @@ func (l *Listener) HandleWSConnection(conn net.Conn, remoteAddr string) {
 		HTTPListener: l.httpListener,
 	})
 	tcpConn.SetAllowedTunnelTypes(l.allowedTunnelTypes)
+	tcpConn.SetAllowedTransports(l.allowedTransports)
+	tcpConn.SetBandwidthConfig(l.bandwidth, l.burstMultiplier)
 
 	l.connMu.Lock()
 	l.connections[connID] = tcpConn
@@ -469,6 +474,17 @@ func (l *Listener) SetAllowedTransports(transports []string) {
 // SetAllowedTunnelTypes sets the allowed tunnel types
 func (l *Listener) SetAllowedTunnelTypes(types []string) {
 	l.allowedTunnelTypes = types
+}
+
+func (l *Listener) SetBandwidth(bandwidth int64) {
+	l.bandwidth = bandwidth
+}
+
+func (l *Listener) SetBurstMultiplier(multiplier float64) {
+	if multiplier <= 0 {
+		multiplier = 2.0
+	}
+	l.burstMultiplier = multiplier
 }
 
 // IsTransportAllowed checks if a transport is allowed

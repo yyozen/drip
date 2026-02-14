@@ -14,6 +14,7 @@ import (
 	"drip/internal/shared/httputil"
 	"drip/internal/shared/netutil"
 	"drip/internal/shared/protocol"
+	"drip/internal/shared/qos"
 	"drip/internal/shared/wsutil"
 )
 
@@ -58,6 +59,13 @@ func (h *Handler) handleWebSocket(w http.ResponseWriter, r *http.Request, tconn 
 		return
 	}
 
+	var limitedStream net.Conn = stream
+	if limiter := tconn.GetLimiter(); limiter != nil && limiter.IsLimited() {
+		if l, ok := limiter.(*qos.Limiter); ok {
+			limitedStream = qos.NewLimitedConn(context.Background(), stream, l)
+		}
+	}
+
 	go func() {
 		defer stream.Close()
 		defer clientConn.Close()
@@ -71,7 +79,7 @@ func (h *Handler) handleWebSocket(w http.ResponseWriter, r *http.Request, tconn 
 			}
 		}
 
-		_ = netutil.PipeWithCallbacks(context.Background(), stream, clientRW,
+		_ = netutil.PipeWithCallbacks(context.Background(), limitedStream, clientRW,
 			func(n int64) { tconn.AddBytesOut(n) },
 			func(n int64) { tconn.AddBytesIn(n) },
 		)

@@ -35,6 +35,22 @@
 
 ## 最近更新
 
+### 2025-02-14
+
+- **带宽限速 (QoS)** - 支持按隧道粒度进行带宽控制，使用令牌桶算法，服务端按 `min(client, server)` 作为实际生效限速
+- **传输协议控制** - 支持服务域名与隧道域名的独立配置
+
+```bash
+# Client: limit to 1MB/s
+drip http 3000 --bandwidth 1M
+```
+
+```yaml
+# Server: global limit (config.yaml)
+bandwidth: 10M
+burst_multiplier: 2.5
+```
+
 ### 2025-01-29
 
 - **Bearer Token 认证** - 新增 Bearer Token 认证支持，用于隧道访问控制

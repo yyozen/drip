@@ -24,6 +24,7 @@ Example:
   drip https 443 --auth secret              Enable proxy authentication with password
   drip https 443 --auth-bearer sk-xxx       Enable proxy authentication with bearer token
   drip https 443 --transport wss            Use WebSocket over TLS (CDN-friendly)
+  drip https 443 --bandwidth 1M             Limit bandwidth to 1 MB/s
 
 Configuration:
   First time: Run 'drip config init' to save server and token
@@ -32,7 +33,13 @@ Configuration:
 Transport options:
   auto  - Automatically select based on server address (default)
   tcp   - Direct TLS 1.3 connection
-  wss   - WebSocket over TLS (works through CDN like Cloudflare)`,
+  wss   - WebSocket over TLS (works through CDN like Cloudflare)
+
+Bandwidth format:
+  1K, 1KB  - 1 kilobyte per second (1024 bytes/s)
+  1M, 1MB  - 1 megabyte per second (1048576 bytes/s)
+  1G, 1GB  - 1 gigabyte per second
+  1024     - 1024 bytes per second (raw number)`,
 	Args:          cobra.ExactArgs(1),
 	RunE:          runHTTPS,
 	SilenceUsage:  true,
@@ -48,6 +55,7 @@ func init() {
 	httpsCmd.Flags().StringVar(&authPass, "auth", "", "Password for proxy authentication")
 	httpsCmd.Flags().StringVar(&authBearer, "auth-bearer", "", "Bearer token for proxy authentication")
 	httpsCmd.Flags().StringVar(&transport, "transport", "auto", "Transport protocol: auto, tcp, wss (WebSocket over TLS)")
+	httpsCmd.Flags().StringVar(&bandwidth, "bandwidth", "", "Bandwidth limit (e.g., 1M, 500K, 1G)")
 	httpsCmd.Flags().BoolVar(&daemonMarker, "daemon-child", false, "Internal flag for daemon child process")
 	httpsCmd.Flags().MarkHidden("daemon-child")
 	rootCmd.AddCommand(httpsCmd)
@@ -72,6 +80,11 @@ func runHTTPS(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	bw, err := parseBandwidth(bandwidth)
+	if err != nil {
+		return err
+	}
+
 	connConfig := &tcp.ConnectorConfig{
 		ServerAddr: serverAddr,
 		Token:      token,
@@ -85,6 +98,7 @@ func runHTTPS(_ *cobra.Command, args []string) error {
 		AuthPass:   authPass,
 		AuthBearer: authBearer,
 		Transport:  parseTransport(transport),
+		Bandwidth:  bw,
 	}
 
 	var daemon *DaemonInfo

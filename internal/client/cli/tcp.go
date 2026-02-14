@@ -24,6 +24,7 @@ Example:
   drip tcp 22 --allow-ip 10.0.0.1          Allow single IP
   drip tcp 22 --deny-ip 1.2.3.4            Block specific IP
   drip tcp 22 --transport wss              Use WebSocket over TLS (CDN-friendly)
+  drip tcp 22 --bandwidth 1M              Limit bandwidth to 1 MB/s
 
 Supported Services:
   - Databases: PostgreSQL (5432), MySQL (3306), Redis (6379), MongoDB (27017)
@@ -54,6 +55,7 @@ func init() {
 	tcpCmd.Flags().StringSliceVar(&allowIPs, "allow-ip", nil, "Allow only these IPs or CIDR ranges (e.g., 192.168.1.1,10.0.0.0/8)")
 	tcpCmd.Flags().StringSliceVar(&denyIPs, "deny-ip", nil, "Deny these IPs or CIDR ranges (e.g., 1.2.3.4,192.168.1.0/24)")
 	tcpCmd.Flags().StringVar(&transport, "transport", "auto", "Transport protocol: auto, tcp, wss (WebSocket over TLS)")
+	tcpCmd.Flags().StringVar(&bandwidth, "bandwidth", "", "Bandwidth limit (e.g., 1M, 500K, 1G)")
 	tcpCmd.Flags().BoolVar(&daemonMarker, "daemon-child", false, "Internal flag for daemon child process")
 	tcpCmd.Flags().MarkHidden("daemon-child")
 	rootCmd.AddCommand(tcpCmd)
@@ -74,6 +76,11 @@ func runTCP(_ *cobra.Command, args []string) error {
 		return err
 	}
 
+	bw, err := parseBandwidth(bandwidth)
+	if err != nil {
+		return err
+	}
+
 	connConfig := &tcp.ConnectorConfig{
 		ServerAddr: serverAddr,
 		Token:      token,
@@ -85,6 +92,7 @@ func runTCP(_ *cobra.Command, args []string) error {
 		AllowIPs:   allowIPs,
 		DenyIPs:    denyIPs,
 		Transport:  parseTransport(transport),
+		Bandwidth:  bw,
 	}
 
 	var daemon *DaemonInfo

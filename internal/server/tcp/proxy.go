@@ -10,6 +10,7 @@ import (
 
 	"drip/internal/shared/netutil"
 	"drip/internal/shared/pool"
+	"drip/internal/shared/qos"
 
 	"go.uber.org/zap"
 )
@@ -34,6 +35,7 @@ type Proxy struct {
 	cancel context.CancelFunc
 
 	checkIPAccess func(ip string) bool
+	limiter       interface{ IsLimited() bool }
 }
 
 type trafficStats interface {
@@ -71,6 +73,11 @@ func NewProxy(ctx context.Context, port int, subdomain string, openStream func()
 // SetIPAccessCheck sets the IP access control check function.
 func (p *Proxy) SetIPAccessCheck(check func(ip string) bool) {
 	p.checkIPAccess = check
+}
+
+// SetLimiter sets the bandwidth limiter for this proxy.
+func (p *Proxy) SetLimiter(limiter interface{ IsLimited() bool }) {
+	p.limiter = limiter
 }
 
 func (p *Proxy) Start() error {
@@ -240,10 +247,17 @@ func (p *Proxy) handleConn(conn net.Conn) {
 
 	defer stream.Close()
 
+	var limitedStream net.Conn = stream
+	if p.limiter != nil && p.limiter.IsLimited() {
+		if l, ok := p.limiter.(*qos.Limiter); ok {
+			limitedStream = qos.NewLimitedConn(p.ctx, stream, l)
+		}
+	}
+
 	_ = netutil.PipeWithCallbacksAndBufferSize(
 		p.ctx,
 		conn,
-		stream,
+		limitedStream,
 		pool.SizeLarge,
 		func(n int64) {
 			if p.stats != nil {

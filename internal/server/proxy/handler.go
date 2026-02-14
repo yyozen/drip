@@ -20,6 +20,7 @@ import (
 	"drip/internal/shared/netutil"
 	"drip/internal/shared/pool"
 	"drip/internal/shared/protocol"
+	"drip/internal/shared/qos"
 )
 
 // bufio.Reader pool to reduce allocations on hot path
@@ -247,7 +248,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tconn.IncActiveConnections()
 	defer tconn.DecActiveConnections()
 
-	countingStream := netutil.NewCountingConn(stream,
+	var limitedStream net.Conn = stream
+	if limiter := tconn.GetLimiter(); limiter != nil && limiter.IsLimited() {
+		if l, ok := limiter.(*qos.Limiter); ok {
+			limitedStream = qos.NewLimitedConn(r.Context(), stream, l)
+		}
+	}
+
+	countingStream := netutil.NewCountingConn(limitedStream,
 		tconn.AddBytesOut,
 		tconn.AddBytesIn,
 	)

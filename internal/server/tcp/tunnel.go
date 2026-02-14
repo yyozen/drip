@@ -52,6 +52,9 @@ func (c *Connection) handleTCPTunnel(reader *bufio.Reader) error {
 	if c.tunnelConn != nil && c.tunnelConn.HasIPAccessControl() {
 		c.proxy.SetIPAccessCheck(c.tunnelConn.IsIPAllowed)
 	}
+	if c.tunnelConn != nil {
+		c.proxy.SetLimiter(c.tunnelConn.GetLimiter())
+	}
 
 	// Update lifecycle manager with proxy
 	if c.lifecycleManager != nil {

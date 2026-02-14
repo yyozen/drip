@@ -22,6 +22,7 @@ type TunnelConfig struct {
 	DenyIPs    []string `yaml:"deny_ips,omitempty"`    // Denied IPs/CIDRs
 	Auth       string   `yaml:"auth,omitempty"`        // Proxy authentication password (http/https only)
 	AuthBearer string   `yaml:"auth_bearer,omitempty"` // Proxy authentication bearer token (http/https only)
+	Bandwidth  string   `yaml:"bandwidth,omitempty"`   // Bandwidth limit (e.g., 1M, 500K, 1G)
 }
 
 // Validate checks if the tunnel configuration is valid

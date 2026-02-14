@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"drip/internal/shared/constants"
 	"drip/internal/shared/httputil"
 	"drip/internal/shared/protocol"
+	"drip/internal/shared/qos"
 
 	"go.uber.org/zap"
 )
@@ -69,6 +71,8 @@ type Connection struct {
 	// Server capabilities
 	allowedTunnelTypes []string
 	allowedTransports  []string
+	bandwidth          int64
+	burstMultiplier    float64
 }
 
 // NewConnection creates a new connection handler
@@ -231,11 +235,46 @@ func (c *Connection) Handle() error {
 		)
 	}
 
+	// Configure bandwidth limiting
+	effectiveBandwidth := c.bandwidth
+	if req.Bandwidth > 0 {
+		if effectiveBandwidth == 0 || req.Bandwidth < effectiveBandwidth {
+			effectiveBandwidth = req.Bandwidth
+		}
+	}
+	if effectiveBandwidth > 0 {
+		burstMultiplier := c.burstMultiplier
+		if burstMultiplier <= 0 {
+			burstMultiplier = 2.0
+		}
+		c.tunnelConn.SetBandwidthWithBurst(effectiveBandwidth, burstMultiplier)
+		burst := limiterBurst(effectiveBandwidth, burstMultiplier)
+
+		limiter := qos.NewLimiter(qos.Config{
+			Bandwidth: effectiveBandwidth,
+			Burst:     burst,
+		})
+		c.tunnelConn.SetLimiter(limiter)
+
+		source := "server"
+		if req.Bandwidth > 0 && (c.bandwidth == 0 || req.Bandwidth < c.bandwidth) {
+			source = "client"
+		}
+		c.logger.Info("Bandwidth limit configured",
+			zap.String("subdomain", c.subdomain),
+			zap.Int64("bandwidth_bytes_sec", effectiveBandwidth),
+			zap.Float64("burst_multiplier", burstMultiplier),
+			zap.Int("burst_bytes", burst),
+			zap.String("source", source),
+		)
+	}
+
 	// Build and send registration response
 	resp, err := regHandler.BuildRegistrationResponse(result)
 	if err != nil {
 		return fmt.Errorf("failed to build registration response: %w", err)
 	}
+	resp.Bandwidth = c.tunnelConn.GetBandwidth()
 
 	if err := regHandler.SendRegistrationResponse(c.conn, resp); err != nil {
 		return fmt.Errorf("failed to send registration ack: %w", err)
@@ -482,4 +521,37 @@ func (c *Connection) isTunnelTypeAllowed(tunnelType string) bool {
 		}
 	}
 	return false
+}
+
+func (c *Connection) SetBandwidthConfig(bandwidth int64, burstMultiplier float64) {
+	c.bandwidth = bandwidth
+	if burstMultiplier <= 0 {
+		burstMultiplier = 2.0
+	}
+	c.burstMultiplier = burstMultiplier
+}
+
+func limiterBurst(bandwidth int64, burstMultiplier float64) int {
+	if bandwidth <= 0 {
+		return 0
+	}
+
+	if burstMultiplier <= 0 || math.IsNaN(burstMultiplier) || math.IsInf(burstMultiplier, 0) {
+		burstMultiplier = 2.0
+	}
+
+	maxBurst := int64(^uint(0) >> 1)
+	rawBurst := float64(bandwidth) * burstMultiplier
+	if math.IsNaN(rawBurst) || rawBurst <= 0 {
+		return 1
+	}
+	if rawBurst >= float64(maxBurst) {
+		return int(maxBurst)
+	}
+
+	burst := int(rawBurst)
+	if burst <= 0 {
+		return 1
+	}
+	return burst
 }

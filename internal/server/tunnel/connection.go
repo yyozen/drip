@@ -32,6 +32,10 @@ type Connection struct {
 
 	ipAccessChecker *netutil.IPAccessChecker
 	proxyAuth       *protocol.ProxyAuth
+
+	bandwidth       int64
+	burstMultiplier float64
+	limiter         interface{ IsLimited() bool }
 }
 
 func NewConnection(subdomain string, conn *websocket.Conn, logger *zap.Logger) *Connection {
@@ -212,6 +216,31 @@ func (c *Connection) ValidateProxyAuth(password string) bool {
 		return true
 	}
 	return auth.Password == password
+}
+
+func (c *Connection) SetBandwidthWithBurst(bandwidth int64, burstMultiplier float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bandwidth = bandwidth
+	c.burstMultiplier = burstMultiplier
+}
+
+func (c *Connection) GetBandwidth() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.bandwidth
+}
+
+func (c *Connection) SetLimiter(limiter interface{ IsLimited() bool }) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.limiter = limiter
+}
+
+func (c *Connection) GetLimiter() interface{ IsLimited() bool } {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.limiter
 }
 
 func (c *Connection) StartWritePump() {

@@ -41,6 +41,10 @@ type ServerConfig struct {
 
 	// Allowed tunnel types: "http", "https", "tcp" (default: all)
 	AllowedTunnelTypes []string `yaml:"tunnel_types"`
+
+	// Bandwidth limiting
+	Bandwidth       string  `yaml:"bandwidth,omitempty"`
+	BurstMultiplier float64 `yaml:"burst_multiplier,omitempty"`
 }
 
 // Validate checks if the server configuration is valid

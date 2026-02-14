@@ -30,6 +30,9 @@ func buildDaemonArgs(tunnelType string, args []string, subdomain string, localAd
 	if authBearer != "" {
 		daemonArgs = append(daemonArgs, "--auth-bearer", authBearer)
 	}
+	if bandwidth != "" {
+		daemonArgs = append(daemonArgs, "--bandwidth", bandwidth)
+	}
 	if insecure {
 		daemonArgs = append(daemonArgs, "--insecure")
 	}

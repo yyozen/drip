@@ -81,6 +81,9 @@ type PoolClient struct {
 
 	// Session scaler
 	scaler *SessionScaler
+
+	// Bandwidth limit requested from server (bytes/sec), 0 = unlimited
+	bandwidth int64
 }
 
 // NewPoolClient creates a new pool client.
@@ -178,6 +181,7 @@ func NewPoolClient(cfg *ConnectorConfig, logger *zap.Logger) *PoolClient {
 		transport:       transport,
 		insecure:        cfg.Insecure,
 		dialer:          NewConnectionDialer(serverAddr, tlsConfig, cfg.Token, transport, logger),
+		bandwidth:       cfg.Bandwidth,
 	}
 
 	if tunnelType == protocol.TunnelTypeHTTP || tunnelType == protocol.TunnelTypeHTTPS {
@@ -229,6 +233,10 @@ func (c *PoolClient) Connect() error {
 		}
 	}
 
+	if c.bandwidth > 0 {
+		req.Bandwidth = c.bandwidth
+	}
+
 	payload, err := json.Marshal(req)
 	if err != nil {
 		_ = primaryConn.Close()
@@ -273,6 +281,10 @@ func (c *PoolClient) Connect() error {
 	c.subdomain = resp.Subdomain
 	if resp.SupportsDataConn && resp.TunnelID != "" {
 		c.tunnelID = resp.TunnelID
+	}
+
+	if resp.Bandwidth > 0 {
+		c.bandwidth = resp.Bandwidth
 	}
 
 	yamuxCfg := mux.NewClientConfig()

@@ -106,6 +106,12 @@ func runStart(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("no tunnels to start")
 	}
 
+	for _, t := range tunnelsToStart {
+		if err := validateTunnelBandwidth(t); err != nil {
+			return err
+		}
+	}
+
 	// Start tunnels
 	if len(tunnelsToStart) == 1 {
 		return startSingleTunnel(cfg, tunnelsToStart[0])
@@ -127,7 +133,10 @@ func formatTunnelInfo(t *config.TunnelConfig) string {
 }
 
 func startSingleTunnel(cfg *config.ClientConfig, t *config.TunnelConfig) error {
-	connConfig := buildConnectorConfig(cfg, t)
+	connConfig, err := buildConnectorConfig(cfg, t)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("Starting tunnel '%s' (%s %s:%d)\n", t.Name, t.Type, getAddress(t), t.Port)
 
@@ -164,7 +173,11 @@ func startMultipleTunnels(cfg *config.ClientConfig, tunnels []*config.TunnelConf
 		go func(tunnel *config.TunnelConfig) {
 			defer wg.Done()
 
-			connConfig := buildConnectorConfig(cfg, tunnel)
+			connConfig, err := buildConnectorConfig(cfg, tunnel)
+			if err != nil {
+				errChan <- err
+				return
+			}
 			fmt.Printf("  Starting %s (%s %s:%d)...\n", tunnel.Name, tunnel.Type, getAddress(tunnel), tunnel.Port)
 
 			client := tcp.NewTunnelClient(connConfig, logger)
@@ -212,7 +225,12 @@ func startMultipleTunnels(cfg *config.ClientConfig, tunnels []*config.TunnelConf
 	return nil
 }
 
-func buildConnectorConfig(cfg *config.ClientConfig, t *config.TunnelConfig) *tcp.ConnectorConfig {
+func buildConnectorConfig(cfg *config.ClientConfig, t *config.TunnelConfig) (*tcp.ConnectorConfig, error) {
+	bw, err := parseBandwidth(t.Bandwidth)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bandwidth for tunnel '%s': %w", t.Name, err)
+	}
+
 	tunnelType := protocol.TunnelTypeHTTP
 	switch t.Type {
 	case "https":
@@ -242,7 +260,8 @@ func buildConnectorConfig(cfg *config.ClientConfig, t *config.TunnelConfig) *tcp
 		AuthPass:   t.Auth,
 		AuthBearer: t.AuthBearer,
 		Transport:  transport,
-	}
+		Bandwidth:  bw,
+	}, nil
 }
 
 func getAddress(t *config.TunnelConfig) string {
@@ -250,4 +269,12 @@ func getAddress(t *config.TunnelConfig) string {
 		return t.Address
 	}
 	return "127.0.0.1"
+}
+
+func validateTunnelBandwidth(t *config.TunnelConfig) error {
+	_, err := parseBandwidth(t.Bandwidth)
+	if err != nil {
+		return fmt.Errorf("invalid bandwidth for tunnel '%s': %w", t.Name, err)
+	}
+	return nil
 }
