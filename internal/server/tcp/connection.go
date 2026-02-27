@@ -19,7 +19,6 @@ import (
 	"drip/internal/server/tunnel"
 	"drip/internal/shared/constants"
 	"drip/internal/shared/httputil"
-	"drip/internal/shared/netutil"
 	"drip/internal/shared/protocol"
 	"drip/internal/shared/qos"
 
@@ -193,11 +192,6 @@ func (c *Connection) Handle() error {
 		c.logger,
 	)
 
-	remoteIP := c.remoteIP
-	if remoteIP == "" && c.conn != nil {
-		remoteIP = netutil.ExtractIP(c.conn.RemoteAddr().String())
-	}
-
 	regReq := &RegistrationRequest{
 		TunnelType:       req.TunnelType,
 		CustomSubdomain:  req.CustomSubdomain,
@@ -207,7 +201,7 @@ func (c *Connection) Handle() error {
 		IPAccess:         req.IPAccess,
 		ProxyAuth:        req.ProxyAuth,
 		LocalPort:        req.LocalPort,
-		RemoteIP:         remoteIP,
+		RemoteIP:         c.remoteIP,
 	}
 
 	result, err := regHandler.Register(regReq)

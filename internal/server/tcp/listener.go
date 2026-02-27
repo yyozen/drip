@@ -306,7 +306,6 @@ func (l *Listener) handleConnection(netConn net.Conn) {
 		HTTPHandler:  l.httpHandler,
 		GroupManager: l.groupManager,
 		HTTPListener: l.httpListener,
-		RemoteIP:     netutil.ExtractIP(netConn.RemoteAddr().String()),
 	})
 	conn.SetAllowedTunnelTypes(l.allowedTunnelTypes)
 	conn.SetAllowedTransports(l.allowedTransports)
@@ -425,6 +424,9 @@ func (l *Listener) HandleWSConnection(conn net.Conn, remoteAddr string) {
 	remoteIP := netutil.ExtractIP(remoteAddr)
 	if remoteIP == "" {
 		remoteIP = netutil.ExtractIP(conn.RemoteAddr().String())
+	}
+	if netutil.IsPrivateIP(remoteIP) {
+		remoteIP = ""
 	}
 
 	// Create connection handler (no TLS verification needed - already done by HTTP server)
