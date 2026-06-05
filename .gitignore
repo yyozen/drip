@@ -49,6 +49,7 @@ logs/
 # Temporary files
 tmp/
 temp/
+.worktrees/
 certs/
 .drip-server.env
 benchmark-results/
